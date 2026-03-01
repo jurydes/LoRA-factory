@@ -26,7 +26,7 @@ def load_model(config: TrainConfig):
 
     lora = get_peft_model(model, lora_config)
 
-    return tokenizer, model, lora
+    return tokenizer, lora
 
 # preprocessing and loading dataset
 def make_preprocess(tokenizer, max_length):
@@ -59,8 +59,8 @@ def val_check(model, dataset, config: TrainConfig):
 
 # main function
 def run_lora_pipeline(config: TrainConfig):
-    tokenizer, model, lora = load_model(config)
-    dataset = create_dataset(config)
+    tokenizer, model = load_model(config)
+    dataset = create_dataset(config, tokenizer)
 
     # blank for now 
     trained = train_and_log(model, dataset, config)
