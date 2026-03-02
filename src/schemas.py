@@ -35,3 +35,5 @@ class TrainConfig:
     push_to_hub: bool = False
     hub_model_id: str = ""
     hub_token: str = ""
+
+    num_val_samples: int = 5
