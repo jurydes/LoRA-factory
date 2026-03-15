@@ -3,20 +3,59 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, DataColla
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
 import torch
-
+import multiprocessing
+import traceback
 from load_model import load_model
 from load_dataset import create_dataset
 from train import train_and_log
 from inference import val_check
 
-# main function
-def run_lora_pipeline(config: TrainConfig):
-    tokenizer, model = load_model(config)
-    raw, dataset = create_dataset(config, tokenizer)
+def _training_worker(config: TrainConfig):
+    """
+    Изолированная функция. 
+    Все объекты (модель, токенизатор, тензоры) создаются здесь и уничтожаются вместе с процессом
+    """
+    try:
+        tokenizer, model = load_model(config)
+        raw, dataset = create_dataset(config, tokenizer)
 
-    trained = train_and_log(tokenizer, model, dataset, config)
+        trained = train_and_log(tokenizer, model, dataset, config)
+        
+        # Запуск инференса для проверки
+        val_check(tokenizer, trained, raw["test"], config)
+        
+    except Exception as e:
+        print(f"Критическая ошибка в процессе обучения: {e}")
+        traceback.print_exc()
+        raise SystemExit(1)
+
+def run_lora_pipeline(config: TrainConfig):
+    """
+    Запуск пайплайна в изолированном процессе
+    """
+    # Используем 'spawn' для безопасной работы с CUDA-контекстом
+    ctx = multiprocessing.get_context('spawn')
     
-    # Датасет подгрузили
+    # Создаем и запускаем дочерний процесс
+    process = ctx.Process(target=_training_worker, args=(config,))
+    process.start()
+    
+    # Блокируем главный поток, пока дочерний процесс не завершит работу (и не освободит память)
+    process.join()
+
+    # Проверяем код возврата (0 = успешно)
+    if process.exitcode == 0:
+        return f"Модель {config.model_name} успешно обучена, проверена и сохранена в {config.output_dir}"
+    else:
+        raise RuntimeError(f"Процесс обучения завершился аварийно с кодом: {process.exitcode}")
+
+# Пример точки входа (если запускать main.py напрямую)
+if __name__ == "__main__":
+    config = TrainConfig()
+    result_message = run_lora_pipeline(config)
+    print(result_message)
+
+# Датасет подгрузили
     # Начинаем обучать
     # [450/450 10:52, Epoch 25/25]
     # Step	Training Loss	Validation Loss
@@ -29,10 +68,8 @@ def run_lora_pipeline(config: TrainConfig):
     # 350	0.981155	1.716900
     # 400	0.927908	1.730666
     # 450	0.900962	1.740499
-    
-    val_check(tokenizer, trained, raw["test"], config)
-    
-    # Обучили, проверяем
+
+# Обучили, проверяем
     # [1]
     # Input:      javascript book-series training-materials ES6 closures prototypes async
     # Target:     book-series, javascript, closures, prototypes, async, es6, es2015, training-materials, book, training-providers
@@ -57,6 +94,3 @@ def run_lora_pipeline(config: TrainConfig):
     # Input:      Awesome curated lists for web development in 2025
     # Target:     awesome-list, web-development, javascript, curated, 2025
     # Prediction:  web-development, 2025, collections, lists, awesome, programming, programming-resources, programming-books, react, angular, pwa, javascript, css, html, d3, nodejs, python, go, go-language, golang, viper, python-language, shell, npm, eriche
-
-
-    return f"Модель {config.model_name} обучена и загружена в {config.output_dir}"
