@@ -4,113 +4,10 @@ from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
 import torch
 
-# loading model
-def load_model(config: TrainConfig):
-    """
-    Loads model and tokenizer from pretrained
-    """
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        config.model_name,
-        torch_dtype="auto",
-        device_map="auto"
-    )
-
-    lora_config = LoraConfig(
-        r=config.lora_r,
-        lora_alpha=config.lora_alpha,
-        target_modules=config.target_modules,
-        lora_dropout=config.lora_dropout,
-        bias=config.bias,
-        task_type=config.task_type
-    )
-
-    lora = get_peft_model(model, lora_config)
-
-    return tokenizer, lora
-
-# preprocessing and loading dataset
-def make_preprocess(tokenizer, max_length):
-    def preprocess(batch):
-        texts = [
-            f"Input: {inp}\nTarget: {tgt}"
-            for inp, tgt in zip(batch["input"], batch["target"])
-        ]
-        tokenized = tokenizer(texts, max_length=max_length, truncation=True, padding="max_length")
-        tokenized["labels"] = tokenized["input_ids"].copy()
-        return tokenized
-    return preprocess
-
-def create_dataset(config: TrainConfig, tokenizer):
-    dataset = load_dataset("zamal/github-meta-data")
-    split = dataset["train"].train_test_split(test_size=config.val_split, seed=42)
-
-    tokenized = split.map(make_preprocess(tokenizer, config.max_length), batched=True, remove_columns=["input", "target"])
-    tokenized.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-
-    return split, tokenized
-
-# training LoRA and logging the results
-def train_and_log(tokenizer, model, dataset, config: TrainConfig):
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
-
-    training_args = TrainingArguments(
-        output_dir=config.output_dir,
-        per_device_train_batch_size=config.per_device_train_batch_size,
-        per_device_eval_batch_size=config.per_device_eval_batch_size,
-        learning_rate=config.learning_rate,
-        num_train_epochs=config.num_train_epochs,
-        logging_steps=config.logging_steps,
-        eval_strategy=config.eval_strategy,
-        eval_steps=config.eval_steps,
-        save_steps=config.save_steps,
-        save_total_limit=config.save_total_limit,
-        fp16=config.fp16,
-        gradient_accumulation_steps=config.gradient_accumulation_steps,
-        push_to_hub=config.push_to_hub,
-        hub_model_id=config.hub_model_id if config.push_to_hub else None,
-        hub_token=config.hub_token if config.push_to_hub else None,
-    )
-
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset["train"],
-        eval_dataset=dataset["test"],
-        data_collator=data_collator
-    )
-
-    trainer.train()
-
-    model.save_pretrained(config.output_dir)
-    tokenizer.save_pretrained(config.output_dir)
-
-    return model
-
-# checking if model is ok
-def val_check(tokenizer, model, dataset, config: TrainConfig):
-    model.eval()
-    lines = []
-
-    for i in range(config.num_val_samples):
-        inp = dataset[i]["input"]
-        target = dataset[i]["target"]
-
-        prompt = f"Input: {inp}\nTarget:"
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=config.max_length).to(model.device)
-
-        with torch.no_grad():
-            output = model.generate(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                max_new_tokens=64,
-            )
-
-        prediction = tokenizer.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-        lines.append(f"[{i+1}]\nInput:      {inp}\nTarget:     {target}\nPrediction: {prediction}\n\n")
-
-    with open(config.log_file, "w") as f:
-        f.writelines(lines)
+from load_model import load_model
+from load_dataset import create_dataset
+from train import train_and_log
+from inference import val_check
 
 # main function
 def run_lora_pipeline(config: TrainConfig):
@@ -119,6 +16,47 @@ def run_lora_pipeline(config: TrainConfig):
 
     trained = train_and_log(tokenizer, model, dataset, config)
     
+    # Датасет подгрузили
+    # Начинаем обучать
+    # [450/450 10:52, Epoch 25/25]
+    # Step	Training Loss	Validation Loss
+    # 50	2.080200	2.123073
+    # 100	1.737468	1.909117
+    # 150	1.532364	1.808899
+    # 200	1.301868	1.748557
+    # 250	1.170546	1.716241
+    # 300	1.053347	1.716059
+    # 350	0.981155	1.716900
+    # 400	0.927908	1.730666
+    # 450	0.900962	1.740499
+    
     val_check(tokenizer, trained, raw["test"], config)
+    
+    # Обучили, проверяем
+    # [1]
+    # Input:      javascript book-series training-materials ES6 closures prototypes async
+    # Target:     book-series, javascript, closures, prototypes, async, es6, es2015, training-materials, book, training-providers
+    # Prediction:  javascript, book, book-series, training-materials, learning, learning-program, training, resources, es6, prototypes, async-await, closures, promises, javascript-books, javascript-learning, free-pdf, es6-training, pdf, javascript-training, javascript-books-list, hobbes, hobbes-javascript, free
+
+    # [2]
+    # Input:      javascript snippets" or "nodejs snippets" or "css snippets" in awesome-list or learning-resources or learn-to-code or education
+    # Target:     awesome-list, javascript, snippets, learning-resources, learn-to-code, programming, education, es6-javascript, nodejs, css
+    # Prediction:  javascript, nodejs, css, snippets, lovebanned, awesome-list, learning-resources, education, programming, code-competitions, codebase-attacks, css-in-js, regex, promise, classnames, async-await, document-strings, modular-css, postcss, prettier, vite, vite
+
+    # [3]
+    # Input:      axios" or "node-fetch" or "got" or "unfetch" or "superagent
+    # Target:     http-client, javascript, nodejs, promise, hacktoberfest
+    # Prediction:  axios, node-fetch, got, unfetch, got, node-fetch, superagent, axios, http, promise, url, urljs, urlmagic, urlparser, urlparserjs, urlparser-node, urlmagicjs, urlmagic-node, nodejs, javascript, javascript-http, javascript-http-client, javascript
+
+    # [4]
+    # Input:      Need an AI system that can redact personal information from documents automatically
+    # Target:     pii-redaction, nlp, document-ai, data-privacy, anonymization, text-processing
+    # Prediction:  document-redaction, personal-data-encryption, ai-automation, nlp, data-security, text-redaction, text-generation, generative-ai, generative-models, generative-framework, generative-frameworks, ai-tools, ai-resources, ai-prank, pranks, bad-ai, bad-
+
+    # [5]
+    # Input:      Awesome curated lists for web development in 2025
+    # Target:     awesome-list, web-development, javascript, curated, 2025
+    # Prediction:  web-development, 2025, collections, lists, awesome, programming, programming-resources, programming-books, react, angular, pwa, javascript, css, html, d3, nodejs, python, go, go-language, golang, viper, python-language, shell, npm, eriche
+
 
     return f"Модель {config.model_name} обучена и загружена в {config.output_dir}"
