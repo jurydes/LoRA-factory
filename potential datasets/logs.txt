@@ -1,0 +1,571 @@
+> /home/jurydes/LoRA-factory/.venv/bin/python /home/jurydes/LoRA-factory/src/main.py
+Warning : `load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar.
+Модель (Enter = google/gemma-2b): 
+Опишите задачу, которую вы решаете: Я решаю задачу автоматического преобразования токсичных и агрессивных комментариев в нейтральные и конструктивные реплики. Датасеты должны содержать параллельные пары «исходный текст — отредактированная версия» с сохранением исходного смысла и контекста. Важна полная нейтрализация оскорблений и угроз, точное сохранение фактической части сообщения и естественный, вежливый стиль без излишней формализации.
+
+Шаг 1: ищем все датасеты с русским языком на HuggingFace...
+Найдено: 1619
+
+Шаг 2: LLM оценивает релевантность...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1619/1619 [03:43<00:00,  7.25it/s]
+
+Готово. Подходящих датасетов: 10
+
+============================================================
+https://huggingface.co/datasets/s-nlp/ru_paradetox  (score: 100.0)
+---
+license: openrail++
+task_categories:
+- text-generation
+language:
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/s-nlp/ru_paradetox_toxicity  (score: 100.0)
+---
+license: openrail++
+task_categories:
+- text-classification
+language:
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/Alant2000/taiga_cleared  (score: 100.0)
+---
+dataset_info:
+  features:
+  - name: text
+    dtype: string
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/MagistrTheOne/radon-examples  (score: 100.0)
+---
+language:
+- ru
+- en
+license: apache-2.0
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/s-nlp/ru_non_detoxified  (score: 95.0)
+---
+license: openrail++
+task_categories:
+- text-classification
+language:
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/s-nlp/ru_paradetox_content  (score: 95.0)
+---
+license: openrail++
+task_categories:
+- text-classification
+language:
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/d0rj/hh-rlhf-ru  (score: 95.0)
+---
+language_creators:
+- translated
+language:
+- ru
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/d0rj/toxic_dvach_detoxified  (score: 95.0)
+---
+dataset_info:
+  features:
+  - name: comment
+    dtype: string
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/d0rj/rudetoxifier_data  (score: 95.0)
+---
+dataset_info:
+  features:
+  - name: text
+    dtype: string
+... (полный README по ссылке выше)
+
+============================================================
+https://huggingface.co/datasets/d0rj/rudetoxifier_data_detox  (score: 95.0)
+---
+dataset_info:
+  features:
+  - name: text
+    dtype: string
+... (полный README по ссылке выше)
+
+Введите id датасетов для обучения через запятую (можно несколько):
+dataset id(s): s-nlp/ru_paradetox
+
+Определяем колонки датасета 's-nlp/ru_paradetox'...
+  input: ru_toxic_comment, target: ru_neutral_comment
+
+Выберите конфигурацию гиперпараметров:
+  [1] Быстрый (отладка): 2 эпохи, lr=1e-2 — быстрая проверка что всё работает
+  [2] Базовый: 4 эпохи, lr=3e-3 — хороший старт
+  [3] Глубокий: 8 эпох, lr=2e-4, r=16 — для сложных задач
+  [4] Своя конфигурация: Ввести параметры вручную
+
+Ваш выбор [1-4]: 3
+
+Выбрана конфигурация: Глубокий
+
+Итоговые параметры:
+  epochs=8, lr=5e-05, batch=8, lora_r=16, lora_alpha=32
+Warning : `load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar.
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 164/164 [00:09<00:00, 17.02it/s]
+2026-04-12 20:11:13,166 [INFO] load_model: Модель google/gemma-2b загружена, LoRA применена (r=16, alpha=32, device=cuda)
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 's-nlp/ru_paradetox' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+2026-04-12 20:11:13,166 [ERROR] datasets.load: `trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 's-nlp/ru_paradetox' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+2026-04-12 20:11:15,497 [INFO] dataset_work: Датасеты загружены и объединены: 11090 train, 1116 test (из 1 датасет(ов))
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 199/199 [00:01<00:00, 194.50it/s]
+BertModel LOAD REPORT from: bert-base-multilingual-cased
+Key                                        | Status     | Details
+-------------------------------------------+------------+--------
+cls.predictions.transform.dense.weight     | UNEXPECTED |        
+cls.predictions.bias                       | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |        
+cls.seq_relationship.weight                | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |        
+cls.seq_relationship.bias                  | UNEXPECTED |        
+cls.predictions.transform.dense.bias       | UNEXPECTED |        
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+2026-04-12 20:16:31,302 [INFO] inference: [ДО обучения] Метрики на 50 примерах: ExactMatch=0.0000, BERTScore F1=0.6468
+{'loss': '4.176', 'grad_norm': '0.2595', 'learning_rate': '4.912e-05', 'epoch': '0.1442'}                                                                                                                                              
+{'loss': '3.673', 'grad_norm': '0.2715', 'learning_rate': '4.822e-05', 'epoch': '0.2884'}                                                                                                                                              
+{'loss': '3.564', 'grad_norm': '0.2459', 'learning_rate': '4.732e-05', 'epoch': '0.4326'}                                                                                                                                              
+{'loss': '3.534', 'grad_norm': '0.2811', 'learning_rate': '4.642e-05', 'epoch': '0.5768'}                                                                                                                                              
+{'loss': '3.5', 'grad_norm': '0.2835', 'learning_rate': '4.552e-05', 'epoch': '0.721'}                                                                                                                                                 
+{'loss': '3.474', 'grad_norm': '0.3169', 'learning_rate': '4.461e-05', 'epoch': '0.8652'}                                                                                                                                              
+{'loss': '3.407', 'grad_norm': '0.3092', 'learning_rate': '4.371e-05', 'epoch': '1.009'}                                                                                                                                               
+{'loss': '3.286', 'grad_norm': '0.4182', 'learning_rate': '4.281e-05', 'epoch': '1.153'}                                                                                                                                               
+{'eval_loss': '3.383', 'eval_runtime': '55.94', 'eval_samples_per_second': '19.95', 'eval_steps_per_second': '2.503', 'epoch': '1.153'}                                                                                                
+{'loss': '3.215', 'grad_norm': '0.3756', 'learning_rate': '4.191e-05', 'epoch': '1.297'}                                                                                                                                               
+{'loss': '3.219', 'grad_norm': '0.367', 'learning_rate': '4.101e-05', 'epoch': '1.441'}                                                                                                                                                
+{'loss': '3.167', 'grad_norm': '0.3908', 'learning_rate': '4.011e-05', 'epoch': '1.585'}                                                                                                                                               
+{'loss': '3.144', 'grad_norm': '0.4107', 'learning_rate': '3.921e-05', 'epoch': '1.73'}                                                                                                                                                
+{'loss': '3.167', 'grad_norm': '0.384', 'learning_rate': '3.831e-05', 'epoch': '1.874'}                                                                                                                                                
+{'loss': '3.201', 'grad_norm': '0.4006', 'learning_rate': '3.741e-05', 'epoch': '2.017'}                                                                                                                                               
+{'loss': '3.134', 'grad_norm': '0.3928', 'learning_rate': '3.651e-05', 'epoch': '2.161'}                                                                                                                                               
+{'loss': '3.123', 'grad_norm': '0.4123', 'learning_rate': '3.561e-05', 'epoch': '2.306'}                                                                                                                                               
+{'eval_loss': '3.321', 'eval_runtime': '46.67', 'eval_samples_per_second': '23.91', 'eval_steps_per_second': '3', 'epoch': '2.306'}                                                                                                    
+{'loss': '3.135', 'grad_norm': '0.4251', 'learning_rate': '3.471e-05', 'epoch': '2.45'}                                                                                                                                                
+{'loss': '3.114', 'grad_norm': '0.4684', 'learning_rate': '3.381e-05', 'epoch': '2.594'}                                                                                                                                               
+{'loss': '3.147', 'grad_norm': '0.4242', 'learning_rate': '3.291e-05', 'epoch': '2.738'}                                                                                                                                               
+{'loss': '3.086', 'grad_norm': '0.4539', 'learning_rate': '3.201e-05', 'epoch': '2.882'}                                                                                                                                               
+{'loss': '3.067', 'grad_norm': '0.4245', 'learning_rate': '3.111e-05', 'epoch': '3.026'}                                                                                                                                               
+{'loss': '3.074', 'grad_norm': '0.4374', 'learning_rate': '3.021e-05', 'epoch': '3.17'}                                                                                                                                                
+{'loss': '3.064', 'grad_norm': '0.4297', 'learning_rate': '2.93e-05', 'epoch': '3.314'}                                                                                                                                                
+{'loss': '3.077', 'grad_norm': '0.4543', 'learning_rate': '2.84e-05', 'epoch': '3.459'}                                                                                                                                                
+{'eval_loss': '3.299', 'eval_runtime': '47.18', 'eval_samples_per_second': '23.66', 'eval_steps_per_second': '2.968', 'epoch': '3.459'}                                                                                                
+{'loss': '3.064', 'grad_norm': '0.4294', 'learning_rate': '2.75e-05', 'epoch': '3.603'}                                                                                                                                                
+{'loss': '3.067', 'grad_norm': '0.5368', 'learning_rate': '2.66e-05', 'epoch': '3.747'}                                                                                                                                                
+{'loss': '3.072', 'grad_norm': '0.444', 'learning_rate': '2.57e-05', 'epoch': '3.891'}                                                                                                                                                 
+{'loss': '3.058', 'grad_norm': '0.4539', 'learning_rate': '2.48e-05', 'epoch': '4.035'}                                                                                                                                                
+{'loss': '3.044', 'grad_norm': '0.5402', 'learning_rate': '2.39e-05', 'epoch': '4.179'}                                                                                                                                                
+{'loss': '3.023', 'grad_norm': '0.5039', 'learning_rate': '2.3e-05', 'epoch': '4.323'}                                                                                                                                                 
+{'loss': '3.032', 'grad_norm': '0.4914', 'learning_rate': '2.21e-05', 'epoch': '4.467'}                                                                                                                                                
+{'loss': '3.039', 'grad_norm': '0.4787', 'learning_rate': '2.12e-05', 'epoch': '4.611'}                                                                                                                                                
+{'eval_loss': '3.295', 'eval_runtime': '67.76', 'eval_samples_per_second': '16.47', 'eval_steps_per_second': '2.066', 'epoch': '4.611'}                                                                                                
+{'loss': '3.034', 'grad_norm': '0.5211', 'learning_rate': '2.03e-05', 'epoch': '4.756'}                                                                                                                                                
+{'loss': '3.039', 'grad_norm': '0.4961', 'learning_rate': '1.94e-05', 'epoch': '4.9'}                                                                                                                                                  
+{'loss': '3.022', 'grad_norm': '0.5093', 'learning_rate': '1.85e-05', 'epoch': '5.043'}                                                                                                                                                
+{'loss': '2.988', 'grad_norm': '0.5806', 'learning_rate': '1.76e-05', 'epoch': '5.187'}                                                                                                                                                
+{'loss': '2.993', 'grad_norm': '0.5118', 'learning_rate': '1.67e-05', 'epoch': '5.332'}                                                                                                                                                
+{'loss': '3.016', 'grad_norm': '0.536', 'learning_rate': '1.58e-05', 'epoch': '5.476'}                                                                                                                                                 
+{'loss': '3.015', 'grad_norm': '0.5446', 'learning_rate': '1.49e-05', 'epoch': '5.62'}                                                                                                                                                 
+{'loss': '3.006', 'grad_norm': '0.5405', 'learning_rate': '1.399e-05', 'epoch': '5.764'}                                                                                                                                               
+{'eval_loss': '3.293', 'eval_runtime': '66.44', 'eval_samples_per_second': '16.8', 'eval_steps_per_second': '2.107', 'epoch': '5.764'}                                                                                                 
+{'loss': '2.995', 'grad_norm': '0.7316', 'learning_rate': '1.309e-05', 'epoch': '5.908'}                                                                                                                                               
+{'loss': '3.02', 'grad_norm': '0.5789', 'learning_rate': '1.219e-05', 'epoch': '6.052'}                                                                                                                                                
+{'loss': '3.01', 'grad_norm': '0.5916', 'learning_rate': '1.129e-05', 'epoch': '6.196'}                                                                                                                                                
+{'loss': '2.981', 'grad_norm': '0.6132', 'learning_rate': '1.039e-05', 'epoch': '6.34'}                                                                                                                                                
+{'loss': '2.984', 'grad_norm': '0.6072', 'learning_rate': '9.492e-06', 'epoch': '6.484'}                                                                                                                                               
+{'loss': '2.984', 'grad_norm': '0.5029', 'learning_rate': '8.591e-06', 'epoch': '6.629'}                                                                                                                                               
+{'loss': '2.958', 'grad_norm': '0.5801', 'learning_rate': '7.691e-06', 'epoch': '6.773'}                                                                                                                                               
+{'loss': '2.999', 'grad_norm': '0.6188', 'learning_rate': '6.79e-06', 'epoch': '6.917'}                                                                                                                                                
+{'eval_loss': '3.29', 'eval_runtime': '659.5', 'eval_samples_per_second': '1.692', 'eval_steps_per_second': '0.212', 'epoch': '6.917'}                                                                                                 
+{'loss': '2.959', 'grad_norm': '0.5547', 'learning_rate': '5.89e-06', 'epoch': '7.061'}                                                                                                                                                
+{'loss': '2.958', 'grad_norm': '0.5823', 'learning_rate': '4.989e-06', 'epoch': '7.205'}                                                                                                                                               
+{'loss': '2.968', 'grad_norm': '0.5983', 'learning_rate': '4.089e-06', 'epoch': '7.349'}                                                                                                                                               
+{'loss': '2.969', 'grad_norm': '0.5932', 'learning_rate': '3.188e-06', 'epoch': '7.493'}                                                                                                                                               
+{'loss': '2.971', 'grad_norm': '0.5772', 'learning_rate': '2.287e-06', 'epoch': '7.637'}                                                                                                                                               
+{'loss': '2.981', 'grad_norm': '0.6412', 'learning_rate': '1.387e-06', 'epoch': '7.782'}                                                                                                                                               
+{'loss': '2.972', 'grad_norm': '0.5939', 'learning_rate': '4.863e-07', 'epoch': '7.926'}                                                                                                                                               
+{'eval_loss': '3.29', 'eval_runtime': '635', 'eval_samples_per_second': '1.758', 'eval_steps_per_second': '0.22', 'epoch': '8'}                                                                                                        
+{'train_runtime': '5.331e+04', 'train_samples_per_second': '1.664', 'train_steps_per_second': '0.052', 'train_loss': '3.125', 'epoch': '8'}                                                                                            
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2776/2776 [14:48:26<00:00, 19.20s/it]
+2026-04-13 11:04:59,429 [INFO] train: Обучение завершено, модель сохранена в ./qwen3_lora
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 199/199 [00:01<00:00, 190.69it/s]
+BertModel LOAD REPORT from: bert-base-multilingual-cased
+Key                                        | Status     | Details
+-------------------------------------------+------------+--------
+cls.predictions.transform.dense.weight     | UNEXPECTED |        
+cls.predictions.bias                       | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |        
+cls.seq_relationship.weight                | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |        
+cls.seq_relationship.bias                  | UNEXPECTED |        
+cls.predictions.transform.dense.bias       | UNEXPECTED |        
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+2026-04-13 11:08:50,080 [INFO] inference: [ПОСЛЕ обучения] Метрики на 50 примерах: ExactMatch=0.0200, BERTScore F1=0.7831
+2026-04-13 11:08:50,080 [INFO] __mp_main__: Сравнение: ExactMatch 0.0000 → 0.0200, BERTScore F1 0.6468 → 0.7831
+[1]
+Input:      пиздеж! температуры горения хватит чтобы её расплавить к херам..
+Target:     Враньё! Температуры горения хватит чтобы ее расплавить
+Prediction: Температура горения достаточна, чтобы ее разогнать
+
+[2]
+Input:      пиздеж! температуры горения хватит чтобы её расплавить к херам..
+Target:     неправда,температуры горения хватит чтобы расплавить её
+Prediction: Температура горения достаточна, чтобы ее разогнать
+
+[3]
+Input:      пиздеж! температуры горения хватит чтобы её расплавить к херам..
+Target:     Враньё! Температуры горения хватит на чтобы её расплавить полностью.
+Prediction: Температура горения достаточна, чтобы ее разогнать
+
+[4]
+Input:      а ты чмо там был.ты вообще служил.гандон
+Target:     А ты там был? Ты вообще служил?
+Prediction: А ты где был? Ты вообще служил
+
+[5]
+Input:      пиздабол ---- а сам где кормишься ?
+Target:     а сам где кормишься ?
+Prediction: А кто же тебя кормит?
+
+Модель google/gemma-2b успешно обучена, проверена и сохранена в ./qwen3_lora
+
+ ~/LoRA-factory | on develop !8 ?6                                                                                                                                                                      took 15h 6m 29s | at 11:09:52 
+> uv run python src/check.py
+Uninstalled 1 package in 210ms
+Installed 1 package in 166ms
+Warning : `load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar.
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 164/164 [01:51<00:00,  1.48it/s]
+Dataset id (Enter = config.dataset_name): s-nlp/ru_paradetox
+input: ru_toxic_comment, target: ru_neutral_comment
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 's-nlp/ru_paradetox' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+Map: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 11090/11090 [00:00<00:00, 11841.48 examples/s]
+Map: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1116/1116 [00:00<00:00, 18959.38 examples/s]
+Режим: [1] примеры, [2] полная оценка (Enter = 1): 2
+Evaluating: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1116/1116 [17:09<00:00,  1.08it/s]
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 199/199 [00:00<00:00, 201.34it/s]
+BertModel LOAD REPORT from: bert-base-multilingual-cased
+Key                                        | Status     | Details
+-------------------------------------------+------------+--------
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |        
+cls.predictions.transform.dense.weight     | UNEXPECTED |        
+cls.seq_relationship.weight                | UNEXPECTED |        
+cls.predictions.transform.dense.bias       | UNEXPECTED |        
+cls.seq_relationship.bias                  | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |        
+cls.predictions.bias                       | UNEXPECTED |        
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Результаты на 1116 примерах:
+  ExactMatch:    0.0000
+  BERTScore F1:  0.8566
+
+ ~/LoRA-factory | on develop !8 ?6                                                                                                                                                                         took 28m 20s | at 17:24:56 
+> uv run python src/check.py
+Warning : `load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar.
+Загрузить обученный адаптер? [y/n] (Enter = y): n
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 164/164 [01:33<00:00,  1.75it/s]
+Загружена базовая модель без адаптера
+Dataset id (Enter = config.dataset_name): s-nlp/ru_paradetox
+input: ru_toxic_comment, target: ru_neutral_comment
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 's-nlp/ru_paradetox' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+Режим: [1] примеры, [2] полная оценка (Enter = 1): 2
+Evaluating:  24%|█████████████████████████████████████████▏                                                                                                                                     | 263/1116 [1:13:59<4:15:45, 17.99s/it]Evaluating:  24%|█████████████████████████████████████████▏                                                                                                                                     | 263/1116 [1:14:11<4:00:39, 16.93s/it]
+Traceback (most recent call last):
+  File "/home/jurydes/LoRA-factory/src/check.py", line 85, in <module>
+    asyncio.run(main())
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 641, in run_forever
+    self._run_once()
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 1987, in _run_once
+    handle._run()
+  File "/usr/lib/python3.12/asyncio/events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "/home/jurydes/LoRA-factory/src/check.py", line 70, in main
+    evaluate_full(test_split)
+  File "/home/jurydes/LoRA-factory/src/check.py", line 43, in evaluate_full
+    predictions.append(predict(example["input"]))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/src/check.py", line 32, in predict
+    output = model.generate(
+             ^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/generation/utils.py", line 2521, in generate
+    result = decoding_method(
+             ^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/generation/utils.py", line 2728, in _sample
+    outputs = model_forward(**model_inputs, return_dict=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 857, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/models/gemma/modeling_gemma.py", line 496, in forward
+    outputs: BaseModelOutputWithPast = self.model(
+                                       ^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 931, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/utils/output_capturing.py", line 248, in wrapper
+    outputs = func(self, *args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/models/gemma/modeling_gemma.py", line 434, in forward
+    hidden_states = decoder_layer(
+                    ^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/modeling_layers.py", line 93, in __call__
+    return super().__call__(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/models/gemma/modeling_gemma.py", line 327, in forward
+    hidden_states, _ = self.self_attn(
+                       ^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/transformers/models/gemma/modeling_gemma.py", line 274, in forward
+    key_states = self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+                 ^^^^^^^^^^^
+  File "/home/jurydes/LoRA-factory/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1955, in __getattr__
+    def __getattr__(self, name: str) -> Union[Tensor, "Module"]:
+
+  File "/usr/lib/python3.12/asyncio/runners.py", line 157, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+ ~/LoRA-factory | on develop !8 ?6                                                                                                                                                                INT | took 1h 18m 16s | at 18:48:36 
+> uv run python src/check.py                                                        
+Warning : `load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar.
+Загрузить обученный адаптер? [y/n] (Enter = y): n
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 164/164 [01:25<00:00,  1.92it/s]
+Загружена базовая модель без адаптера
+Dataset id (Enter = config.dataset_name): s-nlp/ru_paradetox
+input: ru_toxic_comment, target: ru_neutral_comment
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 's-nlp/ru_paradetox' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+Режим: [1] примеры, [2] полная оценка (Enter = 1): 2
+Evaluating: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1116/1116 [29:38<00:00,  1.59s/it]
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 199/199 [00:00<00:00, 216.48it/s]
+BertModel LOAD REPORT from: bert-base-multilingual-cased
+Key                                        | Status     | Details
+-------------------------------------------+------------+--------
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |        
+cls.seq_relationship.bias                  | UNEXPECTED |        
+cls.predictions.transform.dense.bias       | UNEXPECTED |        
+cls.predictions.transform.dense.weight     | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |        
+cls.seq_relationship.weight                | UNEXPECTED |        
+cls.predictions.bias                       | UNEXPECTED |        
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Результаты на 1116 примерах:
+  ExactMatch:    0.0000
+  BERTScore F1:  0.6362
+
+ ~/LoRA-factory | on develop !8 ?6                                                                                                                                                                         took 39m 44s | at 19:28:36 
+> 
+[1]
+Input:      пиздеж! температуры горения хватит чтобы её расплавить к херам..
+Target:     Враньё! Температуры горения хватит чтобы ее расплавить
+Prediction:  Температура горения хватит чтобы её расплавить
+
+[2]
+Input:      пиздеж! температуры горения хватит чтобы её расплавить к херам..
+Target:     неправда,температуры горения хватит чтобы расплавить её
+Prediction:  Температура горения хватит чтобы её расплавить
+
+[3]
+Input:      пиздеж! температуры горения хватит чтобы её расплавить к херам..
+Target:     Враньё! Температуры горения хватит на чтобы её расплавить полностью.
+Prediction:  Температура горения хватит чтобы её расплавить
+
+[4]
+Input:      а ты чмо там был.ты вообще служил.гандон
+Target:     А ты там был? Ты вообще служил?
+Prediction:  А ты там был? Ты вообще служил?
+
+[5]
+Input:      пиздабол ---- а сам где кормишься ?
+Target:     а сам где кормишься ?
+Prediction:  А сам где кормишься?
+
+[6]
+Input:      этому сайту я давно не доверяю, пишут разную х...
+Target:     Этому сайту давно не доверяю, пишут всякую ерунду
+Prediction:  этому сайту я давно не доверяю, пишут разную
+
+[7]
+Input:      у меня сегодня подобный звонок был. достали говнюки.
+Target:     у меня сегодня подобный звонок был. Достали.
+Prediction:  У меня сегодня подобный звонок был. достали их
+
+[8]
+Input:      у меня сегодня подобный звонок был. достали говнюки.
+Target:     У меня сегодня подобный звонок был,надоели
+Prediction:  У меня сегодня подобный звонок был. достали их
+
+[9]
+Input:      это где у неё в россии,пушкинская область?долбоебка
+Target:     Это где у нее в России пушкинская область?
+Prediction:  Это где у неё в России, Пушкинская область?
+
+[10]
+Input:      вы чо курите блять ?
+Target:     Что вы курите?
+Prediction:  Вы что курите?
+
+[11]
+Input:      вы чо курите блять ?
+Target:     Вы что вообще курите?
+Prediction:  Вы что курите?
+
+[12]
+Input:      разыскать и расстрелять к едрене фене
+Target:     Найти и пусть отвечает за свои поступки
+Prediction:  Разыскать и расстрелять его
+
+[13]
+Input:      разыскать и расстрелять к едрене фене
+Target:     Разыскать и отдать под суд!!!
+Prediction:  Разыскать и расстрелять его
+
+[14]
+Input:      да к стенке надо ставить таких врачей извергов
+Target:     Судить надо таких врачей
+Prediction:  да к стенке надо ставить таких врачей
+
+[15]
+Input:      куда смотрят модераторы фотографий? как можно было пропустить эту фотографию? а этого урода убила бы
+Target:     Куда смотрят модераторы, почему пропустили такую фотографию?
+Prediction:  куда смотрят модераторы фотографий? как можно было пропустить эту фотографию?
+
+
+
+ ~/LoRA-factory | on develop !8 ?7                                                                                                                                                                          took 10m 0s | at 22:17:14 
+> uv run python src/check.py
+Warning : `load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar.
+Загрузить обученный адаптер? [y/n] (Enter = y): y
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 164/164 [01:56<00:00,  1.40it/s]
+Загружена обученная модель с адаптером
+Dataset id (Enter = config.dataset_name): s-nlp/ru_paradetox
+input: ru_toxic_comment, target: ru_neutral_comment
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 's-nlp/ru_paradetox' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+Режим: [1] примеры, [2] полная оценка (Enter = 1): 2
+Evaluating: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1116/1116 [18:30<00:00,  1.00it/s]
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 199/199 [00:01<00:00, 198.44it/s]
+BertModel LOAD REPORT from: bert-base-multilingual-cased
+Key                                        | Status     | Details
+-------------------------------------------+------------+--------
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |        
+cls.seq_relationship.bias                  | UNEXPECTED |        
+cls.seq_relationship.weight                | UNEXPECTED |        
+cls.predictions.transform.dense.weight     | UNEXPECTED |        
+cls.predictions.transform.dense.bias       | UNEXPECTED |        
+cls.predictions.bias                       | UNEXPECTED |        
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Результаты на 1116 примерах:
+  BLEU:          43.80
+  chrF:          0.6683
+  BERTScore F1:  0.8567
+
+ ~/LoRA-factory | on develop !8 ?7                                                                                                                                                                         took 26m 55s | at 22:45:17 
+> uv run python src/check.py
+Warning : `load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar.
+Загрузить обученный адаптер? [y/n] (Enter = y): n
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 164/164 [01:42<00:00,  1.59it/s]
+Загружена базовая модель без адаптера
+Dataset id (Enter = config.dataset_name): s-nlp/ru_paradetox
+input: ru_toxic_comment, target: ru_neutral_comment
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 's-nlp/ru_paradetox' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+Режим: [1] примеры, [2] полная оценка (Enter = 1): 2
+Evaluating: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1116/1116 [30:36<00:00,  1.65s/it]
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 199/199 [00:01<00:00, 166.26it/s]
+BertModel LOAD REPORT from: bert-base-multilingual-cased
+Key                                        | Status     | Details
+-------------------------------------------+------------+--------
+cls.seq_relationship.bias                  | UNEXPECTED |        
+cls.predictions.transform.dense.bias       | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |        
+cls.predictions.bias                       | UNEXPECTED |        
+cls.seq_relationship.weight                | UNEXPECTED |        
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |        
+cls.predictions.transform.dense.weight     | UNEXPECTED |        
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Результаты на 1116 примерах:
+  BLEU:          10.75
+  chrF:          0.3572
+  BERTScore F1:  0.6362

@@ -1,96 +1,186 @@
-from src.schemas import TrainConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, DataCollatorForLanguageModeling, TrainingArguments
-from datasets import load_dataset
-from peft import LoraConfig, get_peft_model
-import torch
+import logging
 import multiprocessing
 import traceback
+import asyncio
+from settings import TrainConfig, HYPERPARAMETER_PRESETS
 from load_model import load_model
-from load_dataset import create_dataset
+from dataset_work import create_dataset, check_available_datasets, detect_columns
 from train import train_and_log
-from inference import val_check
+from inference import val_check, compute_metrics
+from datasets import load_dataset as hf_load_dataset
 
-def _training_worker(config: TrainConfig):
-    """
-    Изолированная функция. 
-    Все объекты (модель, токенизатор, тензоры) создаются здесь и уничтожаются вместе с процессом
-    """
+logger = logging.getLogger(__name__)
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def choose_hyperparameters(config: TrainConfig) -> TrainConfig:
+    """Интерактивный выбор гиперпараметров из пресетов или ручной ввод. Возвращает обновлённый config."""
+    print("\nВыберите конфигурацию гиперпараметров:")
+    for key, preset in HYPERPARAMETER_PRESETS.items():
+        print(f"  [{key}] {preset['name']}: {preset['description']}")
+
+    choice = input("\nВаш выбор [1-4]: ").strip()
+    preset = HYPERPARAMETER_PRESETS.get(choice, HYPERPARAMETER_PRESETS["2"])
+
+    if choice not in ['1', '2', '3', '4']:
+        print("Выбран некорректный конфиг, выставляются параметры по умолчанию")
+    elif choice == "4":
+        def ask(name, current):
+            val = input(f"  {name} [{current}]: ").strip()
+            return val if val else str(current)
+
+        config.num_train_epochs = int(ask("num_train_epochs", config.num_train_epochs))
+        config.learning_rate = float(ask("learning_rate", config.learning_rate))
+        config.per_device_train_batch_size = int(ask("batch_size", config.per_device_train_batch_size))
+        config.lora_r = int(ask("lora_r", config.lora_r))
+        config.lora_alpha = int(ask("lora_alpha", config.lora_alpha))
+    else:
+        for k, v in preset["params"].items():
+            setattr(config, k, v)
+        print(f"\nВыбрана конфигурация: {preset['name']}")
+
+    print("\nИтоговые параметры:")
+    print(f"  epochs={config.num_train_epochs}, lr={config.learning_rate}, "
+          f"batch={config.per_device_train_batch_size}, "
+          f"lora_r={config.lora_r}, lora_alpha={config.lora_alpha}")
+    return config
+
+
+def _training_worker(config: TrainConfig, datasets_info: list[tuple[str, str, str]]):
+    import os
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+    from config_gen import suggest_config
     try:
         tokenizer, model = load_model(config)
-        raw, dataset = create_dataset(config, tokenizer)
+        raw, dataset = create_dataset(config, tokenizer, datasets_info)
+
+        metrics_before = compute_metrics(tokenizer, model, raw["test"], config, label="ДО обучения")
+
+        suggested, reasons = suggest_config(config, len(raw["train"]), metrics_before["bert_score_f1"])
+
+        print("\nПредложенная конфигурация на основе эвристик:")
+        for reason in reasons:
+            print(f"  • {reason}")
+        print(f"\n  epochs={suggested.num_train_epochs}, lr={suggested.learning_rate}", end="")
+        if config.adapter_type == "lora":
+            print(f", lora_r={suggested.lora_r}, lora_alpha={suggested.lora_alpha}")
+        else:
+            print()
+        print("\n[1] Использовать предложенную конфигурацию (по умолчанию)")
+        print("[2] Ввести параметры вручную")
+        if input("Ваш выбор [1-2]: ").strip() == "2":
+            config = choose_hyperparameters(config)
+        else:
+            config = suggested
+            print("Используется предложенная конфигурация.")
 
         trained = train_and_log(tokenizer, model, dataset, config)
-        
-        # Запуск инференса для проверки
+        metrics_after = compute_metrics(tokenizer, trained, raw["test"], config, label="ПОСЛЕ обучения")
+
+        logger.info(
+            "Сравнение: ExactMatch %.4f → %.4f, BERTScore F1 %.4f → %.4f",
+            metrics_before["exact_match"], metrics_after["exact_match"],
+            metrics_before["bert_score_f1"], metrics_after["bert_score_f1"],
+        )
+
         val_check(tokenizer, trained, raw["test"], config)
-        
+
     except Exception as e:
-        print(f"Критическая ошибка в процессе обучения: {e}")
+        logger.error("Критическая ошибка в процессе обучения: %s", e)
         traceback.print_exc()
         raise SystemExit(1)
 
-def run_lora_pipeline(config: TrainConfig):
+
+def run_lora_pipeline(config: TrainConfig, datasets_info: list[tuple[str, str, str]]) -> str:
+    """Запускает полный пайплайн обучения в отдельном процессе (spawn) для безопасной работы с CUDA.
+
+    Возвращает строку с результатом или бросает RuntimeError при аварийном завершении.
     """
-    Запуск пайплайна в изолированном процессе
-    """
-    # Используем 'spawn' для безопасной работы с CUDA-контекстом
     ctx = multiprocessing.get_context('spawn')
-    
-    # Создаем и запускаем дочерний процесс
-    process = ctx.Process(target=_training_worker, args=(config,))
+    process = ctx.Process(target=_training_worker, args=(config, datasets_info))
     process.start()
-    
-    # Блокируем главный поток, пока дочерний процесс не завершит работу (и не освободит память)
     process.join()
 
-    # Проверяем код возврата (0 = успешно)
     if process.exitcode == 0:
         return f"Модель {config.model_name} успешно обучена, проверена и сохранена в {config.output_dir}"
     else:
         raise RuntimeError(f"Процесс обучения завершился аварийно с кодом: {process.exitcode}")
 
-# Пример точки входа (если запускать main.py напрямую)
-if __name__ == "__main__":
+
+async def main():
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
     config = TrainConfig()
-    result_message = run_lora_pipeline(config)
-    print(result_message)
 
-# Датасет подгрузили
-    # Начинаем обучать
-    # [450/450 10:52, Epoch 25/25]
-    # Step	Training Loss	Validation Loss
-    # 50	2.080200	2.123073
-    # 100	1.737468	1.909117
-    # 150	1.532364	1.808899
-    # 200	1.301868	1.748557
-    # 250	1.170546	1.716241
-    # 300	1.053347	1.716059
-    # 350	0.981155	1.716900
-    # 400	0.927908	1.730666
-    # 450	0.900962	1.740499
+    MODEL_PRESETS = {
+        "1": ("google/gemma-2b",    "Google Gemma 2B (по умолчанию)"),
+        "2": ("ai-forever/mGPT",    "mGPT 1.3B — обучена на русском"),
+        "3": ("Qwen/Qwen3.5-2B",   "Qwen3.5 2B — может отказываться от токсичных текстов"),
+    }
+    print("\nВыберите модель:")
+    for key, (model_id, desc) in MODEL_PRESETS.items():
+        print(f"  [{key}] {model_id} — {desc}")
+    print(f"  [Enter] по умолчанию: {MODEL_PRESETS['1'][0]}")
+    print("  [другое] введите свой HuggingFace id")
 
-# Обучили, проверяем
-    # [1]
-    # Input:      javascript book-series training-materials ES6 closures prototypes async
-    # Target:     book-series, javascript, closures, prototypes, async, es6, es2015, training-materials, book, training-providers
-    # Prediction:  javascript, book, book-series, training-materials, learning, learning-program, training, resources, es6, prototypes, async-await, closures, promises, javascript-books, javascript-learning, free-pdf, es6-training, pdf, javascript-training, javascript-books-list, hobbes, hobbes-javascript, free
+    choice = input("\nВаш выбор: ").strip()
+    if choice in MODEL_PRESETS:
+        config.model_name = MODEL_PRESETS[choice][0]
+    elif choice:
+        config.model_name = choice
+    else:
+        config.model_name = MODEL_PRESETS["1"][0]
+    print(f"Выбрана модель: {config.model_name}")
 
-    # [2]
-    # Input:      javascript snippets" or "nodejs snippets" or "css snippets" in awesome-list or learning-resources or learn-to-code or education
-    # Target:     awesome-list, javascript, snippets, learning-resources, learn-to-code, programming, education, es6-javascript, nodejs, css
-    # Prediction:  javascript, nodejs, css, snippets, lovebanned, awesome-list, learning-resources, education, programming, code-competitions, codebase-attacks, css-in-js, regex, promise, classnames, async-await, document-strings, modular-css, postcss, prettier, vite, vite
+    print("\nВыберите метод адаптации:")
+    print("  [1] LoRA — стандартный, хорошее качество (по умолчанию)")
+    print("  [2] P-tuning — только виртуальные токены, минимум параметров")
+    adapter_choice = input("\nВаш выбор [1-2]: ").strip()
+    if adapter_choice == "2":
+        config.adapter_type = "p-tuning"
+        print("Выбран P-tuning")
+    else:
+        config.adapter_type = "lora"
+        print("Выбрана LoRA")
 
-    # [3]
-    # Input:      axios" or "node-fetch" or "got" or "unfetch" or "superagent
-    # Target:     http-client, javascript, nodejs, promise, hacktoberfest
-    # Prediction:  axios, node-fetch, got, unfetch, got, node-fetch, superagent, axios, http, promise, url, urljs, urlmagic, urlparser, urlparserjs, urlparser-node, urlmagicjs, urlmagic-node, nodejs, javascript, javascript-http, javascript-http-client, javascript
+    task_description = input("Опишите задачу, которую вы решаете: ").strip()
 
-    # [4]
-    # Input:      Need an AI system that can redact personal information from documents automatically
-    # Target:     pii-redaction, nlp, document-ai, data-privacy, anonymization, text-processing
-    # Prediction:  document-redaction, personal-data-encryption, ai-automation, nlp, data-security, text-redaction, text-generation, generative-ai, generative-models, generative-framework, generative-frameworks, ai-tools, ai-resources, ai-prank, pranks, bad-ai, bad-
+    available_datasets = await check_available_datasets(task_description, config)
+    if available_datasets:
+        print("\nВведите id датасетов для обучения через запятую (можно несколько):")
+        chosen_raw = input("dataset id(s): ").strip()
+        dataset_ids = [d.strip() for d in chosen_raw.split(",") if d.strip()]
+    else:
+        dataset_ids = [config.dataset_name]
 
-    # [5]
-    # Input:      Awesome curated lists for web development in 2025
-    # Target:     awesome-list, web-development, javascript, curated, 2025
-    # Prediction:  web-development, 2025, collections, lists, awesome, programming, programming-resources, programming-books, react, angular, pwa, javascript, css, html, d3, nodejs, python, go, go-language, golang, viper, python-language, shell, npm, eriche
+    datasets_info: list[tuple[str, str, str]] = []
+    for dataset_id in dataset_ids:
+        print(f"\nОпределяем колонки датасета '{dataset_id}'...")
+        while True:
+            try:
+                ds_peek = hf_load_dataset(dataset_id, split="train[:1]")
+                input_col, target_col = await detect_columns(dataset_id, ds_peek.column_names)
+
+                if not input_col or not target_col:
+                    raise ValueError(f"Не удалось определить колонки. Колонки датасета: {ds_peek.column_names}")
+
+                print(f"  input: {input_col}, target: {target_col}")
+                datasets_info.append((dataset_id, input_col, target_col))
+                break
+
+            except (RuntimeError, ValueError) as e:
+                print(f"\n{e}")
+                dataset_id = input("Введите id другого датасета: ").strip()
+
+    model_slug = config.model_name.split("/")[-1]
+    dataset_slug = "+".join(ds_id.split("/")[-1] for ds_id, _, _ in datasets_info)
+    config.output_dir = f"./{model_slug}_{dataset_slug}"
+
+    print(run_lora_pipeline(config, datasets_info))
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
