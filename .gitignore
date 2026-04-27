@@ -10,4 +10,5 @@ wheels/
 .venv
 *.ipynb
 *.env
-check.py
+qwen3_lora
+potential_datasets
