@@ -12,3 +12,4 @@ wheels/
 *.env
 qwen3_lora
 potential_datasets
+lid.176.bin
