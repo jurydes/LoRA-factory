@@ -1,0 +1,1122 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRA factory</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f6f6f3; --surface: #fcfcfb; --raised: #ffffff; --sunken: #efeee9;
+    --ink: #1a1a18; --ink-2: #52514e; --ink-3: #7c7a74;
+    --line: #e1e0d9; --line-strong: #c9c7be;
+    --accent: #2a6fc4; --accent-ink: #1c5cab; --accent-wash: #eaf1fb;
+    --btn: #1f1f1d; --btn-ink: #fcfcfb; --btn-hover: #3a3a37;
+    --good: #0f7a0f; --warn: #946200; --bad: #b42f2f; --bad-wash: #fbeceb;
+    --series-1: #2a78d6; --series-2: #eb6834; --ref: #898781;
+    --radius: 8px;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #111110; --surface: #1a1a19; --raised: #222220; --sunken: #161615;
+      --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8f8d86;
+      --line: #2c2c2a; --line-strong: #3d3d3a;
+      --accent: #6aa3ec; --accent-ink: #8db8f0; --accent-wash: #1d2a3b;
+      --btn: #f0efec; --btn-ink: #1a1a18; --btn-hover: #d6d5cf;
+      --good: #3fbf3f; --warn: #e0a83a; --bad: #ef7a7a; --bad-wash: #3a1f1f;
+      --series-1: #3987e5; --series-2: #d95926; --ref: #898781;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--page); color: var(--ink); }
+  a { color: var(--accent-ink); text-underline-offset: 2px; }
+  code { font-family: var(--mono); font-size: 12.5px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---------- шапка */
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
+  .brand { font-weight: 650; font-size: 15px; letter-spacing: -0.01em; white-space: nowrap; }
+  .steps { display: flex; gap: 2px; list-style: none; margin: 0; padding: 0; flex: 1 1 640px; min-width: 0; overflow-x: auto; }
+  .header-tools { margin-left: auto; }
+  .steps li { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 13px; color: var(--ink-3); white-space: nowrap; border-radius: 6px; }
+  .steps li .n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line-strong); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .steps li.done { color: var(--ink-2); }
+  .steps li.done .n { background: var(--ink-2); border-color: var(--ink-2); color: var(--surface); }
+  .steps li.current { color: var(--ink); font-weight: 600; background: var(--sunken); }
+  .steps li.current .n { border-color: var(--ink); }
+  .steps li.failed { color: var(--bad); }
+  .header-tools { display: flex; align-items: center; gap: 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 7px; padding: 2px; background: var(--sunken); }
+  .seg button { border: 0; background: transparent; padding: 4px 10px; border-radius: 5px; font-size: 13px; color: var(--ink-2); }
+  .seg button[aria-pressed="true"] { background: var(--raised); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+  #conn { font-size: 12px; color: var(--bad); }
+  #sessions { max-width: 240px; min-width: 0; text-overflow: ellipsis; }
+  @media (max-width: 720px) {
+    header { padding: 10px 16px; gap: 10px; }
+    .steps li:not(.current) { padding: 4px 6px; }
+    .steps li:not(.current) .label { display: none; }
+    .header-tools { width: 100%; flex-wrap: wrap; }
+    #sessions { flex: 1 1 140px; max-width: 100%; }
+  }
+
+  /* ---------- раскладка */
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; height: calc(100vh - 53px); }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; height: auto; } #side { border-left: 0; border-top: 1px solid var(--line); } }
+  #chat { display: flex; flex-direction: column; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 24px clamp(16px, 4vw, 48px) 16px; }
+  .thread { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+  /* ---------- сообщения */
+  .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.assistant { color: var(--ink); }
+  .msg.user { align-self: flex-end; max-width: 80%; background: var(--sunken); border: 1px solid var(--line); padding: 8px 12px; border-radius: 12px 12px 4px 12px; }
+  .msg.system { color: var(--ink-3); font-size: 13px; padding-left: 12px; border-left: 2px solid var(--line-strong); }
+  .opts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; white-space: normal; }
+  .busy { font-size: 13px; color: var(--ink-2); }
+  .busy-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+  .busy-head b { font-weight: 500; color: var(--ink); }
+  .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin .9s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .act { list-style: none; margin: 6px 0 0 4px; padding: 0 0 0 14px; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+  .act .who { font-size: 11.5px; font-weight: 600; color: var(--ink-2); margin-top: 4px; }
+  .act .who:first-child { margin-top: 0; }
+  .act .cur, .act .live { color: var(--ink-2); }
+  .act .res { color: var(--ink-3); }
+  .num, [data-since] { font-variant-numeric: tabular-nums; }
+  .progress { height: 4px; border-radius: 2px; background: var(--sunken); overflow: hidden; margin: 2px 0 12px; }
+  .progress i { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width .4s; }
+  .progress-label { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .dots::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.4s steps(4, end) infinite; }
+  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+  /* ---------- карточки */
+  .card { white-space: normal; margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .card-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .card-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+  .card-head .tag { font-size: 12px; color: var(--ink-3); }
+  .card.open { border-color: var(--line-strong); box-shadow: inset 3px 0 0 var(--accent); }
+  .card.open .card-head .tag { color: var(--accent-ink); font-weight: 500; }
+  .card-body { padding: 12px 14px; }
+  .card.collapsed .card-body { display: none; }
+  .card.collapsed .card-head { border-bottom: 0; }
+  .card.collapsed { background: transparent; }
+  .card-head .toggle { margin-left: auto; font-size: 12px; padding: 2px 8px; white-space: nowrap; }
+  .resolution { font-size: 13px; color: var(--ink-2); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+  .card-error { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: var(--bad-wash); color: var(--bad); font-size: 13px; }
+
+  /* ---------- элементы */
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--raised); color: var(--ink); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--ink-3); }
+  button.primary { background: var(--btn); border-color: var(--btn); color: var(--btn-ink); font-weight: 500; }
+  button.primary:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--btn-hover); }
+  button.danger { color: var(--bad); }
+  button.link { border: 0; background: none; padding: 0; color: var(--accent-ink); }
+  button:disabled { opacity: .45; cursor: default; }
+  input, select, textarea { font: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--raised); color: var(--ink); }
+  textarea { resize: vertical; }
+  .file-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+  .file-btn input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .file-btn span { border: 1px dashed var(--line-strong); padding: 5px 10px; border-radius: 6px; }
+  .file-btn:focus-within span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  .kv dt { color: var(--ink-3); font-size: 13px; }
+  .kv dd { margin: 0; }
+  .form { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; align-items: center; }
+  .form label { color: var(--ink-2); font-size: 13px; }
+  .form .hint { grid-column: 2; font-size: 12px; color: var(--ink-3); margin-top: -4px; }
+  .muted { color: var(--ink-3); }
+  .small { font-size: 13px; }
+  .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .num { font-variant-numeric: tabular-nums; }
+  details > summary { cursor: pointer; color: var(--accent-ink); font-size: 13px; margin-top: 10px; }
+  details[open] > summary { margin-bottom: 8px; }
+
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: 13px; width: 100%; }
+  th, td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--ink-3); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.ours td { font-weight: 600; }
+  .delta { font-size: 12px; font-weight: 400; margin-left: 6px; }
+
+  .cand { padding: 12px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; }
+  .cand:first-child { border-top: 0; padding-top: 0; }
+  .cand .name { font-weight: 600; overflow-wrap: anywhere; }
+  .cand .why { grid-column: 1; color: var(--ink-2); }
+  .cand .pick { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+  .cand details { grid-column: 1 / -1; }
+  .meter { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+  .meter .bar { width: 64px; height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); }
+  .meter .bar i { display: block; height: 100%; background: var(--series-1); border-radius: 3px; }
+  .ops { margin: 8px 0 0; padding-left: 18px; }
+  .ops li { margin: 2px 0; }
+  .example { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .example dt { color: var(--ink-3); }
+
+  /* ---------- ввод */
+  #compose { border-top: 1px solid var(--line); background: var(--surface); padding: 12px clamp(16px, 4vw, 48px); }
+  #compose .inner { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  #compose textarea { flex: 1; min-height: 40px; max-height: 160px; resize: none; line-height: 1.4; }
+  #compose .below { max-width: 760px; margin: 6px auto 0; display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); }
+
+  /* ---------- боковая панель */
+  #side { overflow-y: auto; border-left: 1px solid var(--line); background: var(--surface); }
+  .side-sec { padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .side-sec h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; margin-bottom: 12px; }
+  .stat .k { font-size: 12px; color: var(--ink-3); }
+  .stat .v { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .chart-box { position: relative; margin-top: 6px; }
+  .chart-title { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--ink-2); margin-top: 12px; }
+  .legend { display: flex; gap: 12px; font-size: 12px; color: var(--ink-2); }
+  .legend i { display: inline-block; width: 12px; height: 2px; margin-right: 5px; vertical-align: middle; }
+  .legend i.dash { background: none !important; border-top: 2px dashed var(--ref); height: 0; }
+  svg.chart { display: block; width: 100%; height: 150px; overflow: visible; }
+  svg.chart text { fill: var(--ink-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgb(0 0 0 / .08); white-space: nowrap; z-index: 2; }
+  .tip .row { display: flex; gap: 8px; align-items: center; }
+  .tip .row i { width: 8px; height: 2px; display: inline-block; }
+  .tip b { font-variant-numeric: tabular-nums; font-weight: 600; margin-left: auto; padding-left: 10px; }
+  .events { list-style: none; margin: 0; padding: 0; font-size: 13px; max-height: 260px; overflow-y: auto; }
+  .events li { display: grid; grid-template-columns: 78px 1fr; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .events .kind { color: var(--ink-3); font-size: 12px; }
+  .events .kind.warn { color: var(--warn); } .events .kind.bad { color: var(--bad); }
+  .confirm-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  #toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
+  .toast { background: var(--raised); border: 1px solid var(--line-strong); border-left: 3px solid var(--bad); padding: 8px 12px; border-radius: 6px; max-width: 420px; font-size: 13px; box-shadow: 0 4px 16px rgb(0 0 0 / .12); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">LoRA factory</div>
+  <ol class="steps" id="steps" aria-label="Этапы"></ol>
+  <div class="header-tools">
+    <span id="conn" role="status"></span>
+    <div class="seg" role="group" aria-label="Режим работы" id="modeSeg">
+      <button type="button" data-mode="auto" title="Система подтверждает сама; спрашивает только перед запуском обучения, массовым удалением данных и синтезом без уверенности агента, а также если датасетов не нашлось или раунд не дал нужного качества">Авто</button>
+      <button type="button" data-mode="expert" title="Все решения подтверждаете вы; можно править постановку и гиперпараметры">Эксперт</button>
+    </div>
+    <label class="sr-only" for="sessions">Сессия</label>
+    <select id="sessions"></select>
+    <button id="newSession" type="button">Новая сессия</button>
+    <a href="/results" class="small">Все запуски</a>
+  </div>
+</header>
+<main>
+  <section id="chat" aria-label="Диалог">
+    <div id="log"><div class="thread" id="thread" aria-live="polite"></div></div>
+    <form id="compose">
+      <div class="inner">
+        <label class="sr-only" for="text">Сообщение</label>
+        <textarea id="text" rows="1" autocomplete="off"></textarea>
+        <span id="composeUpload"></span>
+        <button class="primary" id="sendBtn" type="submit">Отправить</button>
+      </div>
+      <div class="below"><span id="composeHint"></span><span>Enter — отправить, Shift+Enter — новая строка</span></div>
+    </form>
+  </section>
+  <aside id="side" aria-label="Сводка и обучение">
+    <section class="side-sec"><h2>Сводка</h2><div id="summary"></div></section>
+    <section class="side-sec" id="trainSec">
+      <h2>Обучение</h2>
+      <div id="trainBody"></div>
+    </section>
+    <section class="side-sec"><h2>События обучения</h2><ul class="events" id="eventlog"></ul></section>
+  </aside>
+</main>
+<div id="toasts" role="alert" aria-live="assertive"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (v, d = 3) => v == null || !Number.isFinite(+v) ? "—" : (+v).toFixed(d);
+const pct = v => v == null ? "—" : `${(v * 100).toFixed(1)}%`;
+const sci = v => v == null ? "—" : (+v).toExponential(1).replace("e-", "e−");
+
+const METRIC = { macro_f1: "Macro-F1", accuracy: "Accuracy", weighted_f1: "Weighted-F1", chrf: "chrF", bleu: "BLEU",
+  rougeL: "ROUGE-L", rouge1: "ROUGE-1", rouge2: "ROUGE-2", bert_score_f1: "BERTScore F1", exact_match: "Exact match",
+  entity_f1: "Entity F1", entity_precision: "Entity P", entity_recall: "Entity R", token_f1: "Token F1" };
+const BASELINE = { majority: "Самый частый класс", base_prompt: "Исходная модель с промптом", lead: "Первые предложения входа",
+  copy_input: "Копия входа", gazetteer: "Словарь сущностей из train", best_sentence: "Предложение, ближайшее к вопросу" };
+const modelLabel = m => `${m.id}${m.quality ? ` (MMLU-Pro ${m.quality})` : ""}${m.source === "hub" ? " · с HF" : ""}${m.mode ? ` — ${m.mode === "lora" ? "LoRA" : "только QLoRA"}` : ""}${m.hours_typical != null ? `, ~${m.hours_typical} ч на 10 тыс. примеров` : ""}${m.recommended ? " · рекомендуется" : ""}`;
+const CRITERIA = { relevance: "Релевантность задаче", label_fit: "Соответствие меток", size: "Размер", text_quality: "Качество текста",
+  domain_fit: "Домен", label_reliability: "Надёжность разметки" };
+const ANOMALY = { nan_loss: "Скачок или NaN в loss", plateau: "Метрика на val не растёт", overfit: "Переобучение",
+  grad_explosion: "Взрыв градиента", throughput_drop: "Падение скорости", oom_risk: "Близко к пределу памяти",
+  prediction_collapse: "Модель отвечает одним классом" };
+// Сопоставление колонок (отчёт совместимости или операция map_schema рецепта) — одной строкой
+function schemaText(s) {
+  if (!s || !s.input_column) return "не определено";
+  const kind = s.schema_kind || s.kind;
+  if (kind === "chat") return `диалог «${s.input_column}»: реплика пользователя → вход, ответ ассистента → ответ`;
+  const ins = [s.input_column, ...(s.extra_input_columns || []), ...(s.question_column ? [s.question_column] : [])];
+  let t = `${ins.join(" + ")} → ${s.target_column}`;
+  if (kind === "ner_bio") t = `токены ${s.input_column} + теги ${s.target_column} → сущности`;
+  if (kind === "ner_spans") t = `текст ${s.input_column} + сущности ${s.target_column} → сущности`;
+  if ((s.options_columns || []).length) t += ` (ключ варианта → текст варианта из ${s.options_columns.join(", ")})`;
+  const lf = Object.entries(s.language_filter || {});
+  if (lf.length) t += `; только строки на языке ${[...new Set(lf.map(([, v]) => v))].join(", ")} (по ${lf.map(([k]) => k).join(", ")})`;
+  return t;
+}
+const mName = k => METRIC[k] || k;
+const KEY_RE = new RegExp(`\\b(${[...Object.keys(METRIC), ...Object.keys(BASELINE)].join("|")})\\b`, "g");
+const humanize = t => String(t ?? "").replace(KEY_RE, k => METRIC[k] || BASELINE[k]).replace(/=(\d)/g, " = $1");
+const bName = k => BASELINE[k] || k;
+
+// Этапы сценария: шаги автомата сгруппированы в шесть понятных пользователю этапов
+const STAGES = [
+  ["Постановка", ["INTAKE", "SPEC_CONFIRM"]],
+  ["Датасет", ["SEARCH", "DATASET_CHOICE"]],
+  ["Данные", ["PREP", "PREP_CONFIRM"]],
+  ["Конфигурация", ["HPARAMS", "CONFIG_CONFIRM"]],
+  ["Обучение", ["TRAINING", "ROUND_REVIEW"]],
+  ["Результат", ["EVAL", "DONE"]],
+];
+const stageOf = step => STAGES.findIndex(([, steps]) => steps.includes(step));
+
+let sid = null, state = null, es = null, metrics = [], events = [];
+let pending = false;                 // идёт запрос — кнопки действий заблокированы
+const cardErrors = {};               // ошибка действия у конкретной карточки
+const drafts = {};                   // несохранённые правки полей карточек: переживают перерисовку
+const openDetails = new Set();       // раскрытые <details> и свёрнутые карточки, раскрытые пользователем
+let confirmAbort = false;
+let lastStageIdx = -1;
+
+// ---------------------------------------------------------------- сеть
+
+function toast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg;
+  $("#toasts").append(t);
+  setTimeout(() => t.remove(), 8000);
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (!r.ok) {
+    let d = await r.text();
+    try { d = JSON.parse(d).detail; } catch {}
+    throw new Error(typeof d === "string" ? d : JSON.stringify(d));
+  }
+  return r.json();
+}
+async function act(card, action, payload) {
+  if (pending) return;
+  pending = true;
+  if (card) delete cardErrors[card.id];
+  render();
+  try {
+    state = await api(`/api/sessions/${sid}/action`, { method: "POST", body: JSON.stringify({ card_id: card ? card.id : null, action, payload }) });
+    if (card) delete drafts[card.id];
+  } catch (e) {
+    if (card) cardErrors[card.id] = e.message; else toast(e.message);
+  } finally {
+    pending = false;
+    render();
+  }
+}
+async function upload(file) {
+  if (!file || pending) return;
+  pending = true; render();
+  try {
+    const r = await fetch(`/api/sessions/${sid}/upload?filename=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+    if (!r.ok) throw new Error((await r.json()).detail);
+    state = await r.json();
+  } catch (e) { toast(`Файл не принят: ${e.message}`); }
+  finally { pending = false; render(); }
+}
+
+// ---------------------------------------------------------------- DOM-помощники
+
+function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
+function btn(label, onClick, cls = "", attrs = {}) {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = label; b.className = cls;
+  b.disabled = pending || !!attrs.disabled;
+  if (attrs.title) b.title = attrs.title;
+  b.onclick = onClick;
+  return b;
+}
+function fileButton(label) {
+  const w = el(`<label class="file-btn"><input type="file" accept=".csv,.tsv,.json,.jsonl,.parquet,.xlsx"><span>${esc(label)}</span></label>`);
+  const input = w.querySelector("input");
+  input.disabled = pending;
+  input.onchange = e => upload(e.target.files[0]);
+  return w;
+}
+function detailsEl(key, summary, inner) {
+  const d = el(`<details><summary>${esc(summary)}</summary></details>`);
+  if (openDetails.has(key)) d.open = true;
+  d.ontoggle = () => d.open ? openDetails.add(key) : openDetails.delete(key);
+  d.append(typeof inner === "string" ? el(`<div>${inner}</div>`) : inner);
+  return d;
+}
+function draft(card, key, fallback) { return drafts[card.id]?.[key] ?? fallback; }
+function bindDraft(card, root) {
+  root.querySelectorAll("[data-k]").forEach(i => i.addEventListener("input", () => {
+    (drafts[card.id] ||= {})[i.dataset.k] = i.value;
+  }));
+}
+
+// Сравнительная таблица метрик: наша строка выделена, у baseline'ов — отставание от нас по основной метрике
+function metricsTable(oursLabel, ours, baselines, primary) {
+  const cols = Object.keys(ours || {});
+  if (primary && cols.includes(primary)) cols.splice(cols.indexOf(primary), 1), cols.unshift(primary);
+  const head = `<tr><th></th>${cols.map(c => `<th class="num">${esc(mName(c))}</th>`).join("")}</tr>`;
+  const row = (name, m, ours) => `<tr class="${ours ? "ours" : ""}"><td>${esc(name)}</td>${cols.map(c => {
+    let delta = "";
+    if (!ours && c === primary && m?.[c] != null && ours_[c] != null) {
+      const d = ours_[c] - m[c];
+      delta = Math.abs(d) < 0.0005 ? `<span class="delta muted">±0</span>`
+        : `<span class="delta ${d > 0 ? "good" : "bad"}">${d > 0 ? "+" : "−"}${num(Math.abs(d))}</span>`;
+    }
+    return `<td class="num">${num(m?.[c])}${delta}</td>`;
+  }).join("")}</tr>`;
+  const ours_ = ours || {};
+  const rows = [row(oursLabel, ours, true), ...Object.entries(baselines || {}).map(([k, v]) => row(bName(k), v, false))];
+  return `<div class="tbl"><table><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>
+    ${primary && Object.keys(baselines || {}).length ? `<p class="small muted" style="margin:6px 0 0">Цифра рядом с baseline — насколько адаптер лучше (+) или хуже (−) по ${esc(mName(primary))}.</p>` : ""}`;
+}
+
+// ---------------------------------------------------------------- карточки
+
+const CARD_TITLES = { spec: "Постановка задачи", dataset_choice: "Выбор датасета", prep: "Подготовка данных", augment: "Синтез данных",
+  config: "Конфигурация обучения", round: "Итоги раунда", result: "Результат", info: "" };
+
+function resolutionText(card) {
+  const r = card.resolution;
+  if (!r) return "Подтверждено автоматически";
+  switch (r.action) {
+    case "auto":
+      if (r.hf_id) return `Выбран автоматически: ${String(r.hf_id).replace(/^user:/, "")}`;
+      if (r.choice === "finish") return "Автоматически: остановлено, финальная оценка";
+      return "Подтверждено автоматически";
+    case "edit_in_chat": return "Поправлено в чате";
+    case "new_task": return "Начата новая задача";
+    case "confirm_spec": return "Подтверждено";
+    case "upload": return "Подтверждено, используется ваш датасет";
+    case "choose_dataset": return `Выбран ${String(r.hf_id).replace(/^user:/, "")}`;
+    case "none_fit": return "Ни один не подошёл";
+    case "superseded": return "Заменено новым списком";
+    case "confirm_prep": return "Подтверждено";
+    case "other_dataset": return "Выбран другой датасет";
+    case "approve_augment": return "Синтез одобрен";
+    case "decline_augment": return "Без синтеза";
+    case "confirm_config": return r.config ? "Запущено с правками" : "Запущено";
+    case "recompute_config": return "Пересчитано";
+    case "reuse_adapter": return `Взят готовый адаптер ${r.run_id}`;
+    case "round_finish": return "Остановлено, финальная оценка";
+    case "round_continue": return `Продолжено ещё на ${r.epochs} эп.`;
+    case "round_restart": return "Перезапуск с другими параметрами";
+    default: return "Обработано";
+  }
+}
+
+const CARDS = {
+  spec(card, p) {
+    const s = p.spec, c = s.constraints;
+    p = { ...p, models: (p.models || []).map(m => typeof m === "string" ? { id: m } : m) };  // сессии до оценки железа
+    const editable = state.settings.mode === "expert" && !card.resolved;
+    const limits = [c.gpu_hours && `не больше ${c.gpu_hours} GPU-ч`, c.max_model_params_b && `модель до ${c.max_model_params_b} млрд`,
+      c.target_metric_value != null && `цель ${mName(s.primary_metric)} ≥ ${c.target_metric_value}`, c.commercial_license && "коммерческая лицензия"].filter(Boolean);
+    const method = { auto: "выберет система", lora: "LoRA", qlora: "QLoRA", ptuning: "P-tuning" }[c.adapter_method] || c.adapter_method;
+    let body;
+    if (editable) {
+      body = el(`<div class="form">
+        <label for="d-${card.id}">Задача</label><textarea id="d-${card.id}" data-k="description" rows="2">${esc(draft(card, "description", s.description))}</textarea>
+        <label>Тип</label><div>${esc(p.task_title)}</div>
+        <label for="l-${card.id}">Метки</label><input id="l-${card.id}" data-k="labels" value="${esc(draft(card, "labels", (s.labels || []).join(", ")))}">
+        <span class="hint">через запятую</span>
+        <label for="lang-${card.id}">Язык</label><input id="lang-${card.id}" data-k="language" size="4" value="${esc(draft(card, "language", s.language))}">
+        <label for="m-${card.id}">Модель</label><select id="m-${card.id}" data-k="base_model_id">${p.models.map(m => `<option value="${esc(m.id)}" ${m.id === draft(card, "base_model_id", s.base_model_id) ? "selected" : ""}>${esc(modelLabel(m))}</option>`).join("")}</select>
+        <span class="hint">учтены VRAM, RAM и скорость этой машины</span>
+        <label for="am-${card.id}">Метод</label><select id="am-${card.id}" data-c="adapter_method">${["auto", "lora", "qlora", "ptuning"].map(v => `<option ${v === draft(card, "c.adapter_method", c.adapter_method) ? "selected" : ""}>${v}</option>`).join("")}</select>
+        <label for="gh-${card.id}">GPU-часов, не больше</label><input id="gh-${card.id}" data-c="gpu_hours" type="number" step="0.5" min="0" value="${esc(draft(card, "c.gpu_hours", c.gpu_hours ?? ""))}" style="width:120px">
+        <label for="mp-${card.id}">Модель, млрд параметров, до</label><input id="mp-${card.id}" data-c="max_model_params_b" type="number" step="0.1" min="0" value="${esc(draft(card, "c.max_model_params_b", c.max_model_params_b ?? ""))}" style="width:120px">
+        <label for="tm-${card.id}">Цель ${esc(mName(s.primary_metric))}</label><input id="tm-${card.id}" data-c="target_metric_value" type="number" step="0.01" min="0" value="${esc(draft(card, "c.target_metric_value", c.target_metric_value ?? ""))}" style="width:120px">
+        <label for="lt-${card.id}">Задержка ответа, мс, до</label><input id="lt-${card.id}" data-c="max_latency_ms" type="number" step="10" min="0" value="${esc(draft(card, "c.max_latency_ms", c.max_latency_ms ?? ""))}" style="width:120px">
+        <label for="cl-${card.id}">Коммерческая лицензия</label><input id="cl-${card.id}" data-c="commercial_license" type="checkbox" ${draft(card, "c.commercial_license", c.commercial_license) ? "checked" : ""}>
+        <label>Метрика</label><div>${esc(mName(s.primary_metric))} <span class="muted small">— задана типом задачи</span></div>
+      </div>`);
+      body.querySelectorAll("[data-c]").forEach(i => i.addEventListener("input", () => {
+        (drafts[card.id] ||= {})[`c.${i.dataset.c}`] = i.type === "checkbox" ? i.checked : i.value;
+      }));
+      bindDraft(card, body);
+    } else {
+      body = el(`<dl class="kv">
+        <dt>Задача</dt><dd>${esc(s.description)}</dd>
+        <dt>Тип</dt><dd>${esc(p.task_title)}</dd>
+        ${s.labels ? `<dt>Метки</dt><dd>${esc(s.labels.join(", "))}</dd>` : ""}
+        <dt>Язык</dt><dd>${esc(s.language)}</dd>
+        <dt>Модель</dt><dd>${esc(s.base_model_id)}${(() => { const m = (p.models || []).find(x => x.id === s.base_model_id); return m && m.mode ? ` <span class="muted small">— ${m.mode === "lora" ? "LoRA" : "только QLoRA"}${m.hours_typical != null ? `, ~${m.hours_typical} ч на 10 тыс. примеров` : ""}</span>` : ""; })()}</dd>
+        <dt>Метод</dt><dd>${esc(method)}</dd>
+        <dt>Метрика</dt><dd>${esc(mName(s.primary_metric))} <span class="muted small">— задана типом задачи</span></dd>
+        ${limits.length ? `<dt>Ограничения</dt><dd>${esc(limits.join("; "))}</dd>` : ""}
+      </dl>`);
+    }
+    const div = el(`<div></div>`); div.append(body);
+    if (!card.resolved) {
+      const a = el(`<div class="actions"></div>`);
+      a.append(btn("Подтвердить и искать датасет", () => {
+        let edited = null;
+        if (editable) {
+          edited = {};
+          body.querySelectorAll("[data-k]").forEach(i => edited[i.dataset.k] = i.dataset.k === "labels" ? i.value.split(",").map(x => x.trim()).filter(Boolean) : i.value);
+          const cons = { ...c };
+          body.querySelectorAll("[data-c]").forEach(i => {
+            cons[i.dataset.c] = i.type === "checkbox" ? i.checked : (i.tagName === "SELECT" ? i.value : (i.value === "" ? null : +i.value));
+          });
+          edited.constraints = cons;
+        }
+        act(card, "confirm_spec", { spec: edited });
+      }, "primary"));
+      a.append(fileButton("Подтвердить со своим датасетом…"));
+      div.append(a, el(`<p class="small muted" style="margin:8px 0 0">Чтобы поправить постановку, просто напишите в чат.</p>`));
+    }
+    return div;
+  },
+
+  dataset_choice(card, p) {
+    const div = el(`<div></div>`);
+    if (!p.candidates.length) div.append(el(`<p class="muted" style="margin:0">Подходящих датасетов не нашлось. Опишите задачу иначе или загрузите свой файл.</p>`));
+    const list = el(`<div></div>`);
+    p.candidates.forEach((c, i) => {
+      const issues = c.compat?.issues || [];
+      const name = c.source === "hf" ? `<a href="https://huggingface.co/datasets/${esc(c.hf_id)}" target="_blank" rel="noopener">${esc(c.hf_id)}</a>` : esc(c.hf_id.replace(/^user:/, "Ваш файл: "));
+      const size = Object.values(c.split_sizes || {}).reduce((a, b) => a + b, 0);
+      const row = el(`<div class="cand">
+        <div><span class="name">${name}</span></div>
+        <div class="why">${esc(c.why || "Прошёл проверку совместимости")}</div>
+        <div class="small muted" style="grid-column:1">${[size && `${size.toLocaleString("ru")} строк`, c.lang_examples != null && `~${c.lang_examples.toLocaleString("ru")} на нужном языке`, c.license && `лицензия ${c.license}`].filter(Boolean).map(esc).join(" · ")}</div>
+      </div>`);
+      row.querySelector("div").append(el(`<span class="meter" style="margin-left:10px" title="Итоговая оценка 0–100"><span class="bar"><i style="width:${Math.max(0, Math.min(100, c.score))}%"></i></span>${num(c.score, 0)}</span>`));
+      if (!card.resolved) {
+        const pick = btn("Выбрать", () => act(card, "choose_dataset", { hf_id: c.hf_id }), i === 0 ? "primary pick" : "pick");
+        row.append(pick);
+      }
+      const det = `<dl class="kv small">
+          <dt>Колонки</dt><dd>${esc(schemaText(c.compat))}</dd>
+          ${(c.compat?.preview || []).slice(0, 1).map(e => `<dt>Пример</dt><dd><div class="muted" style="white-space:pre-wrap">${esc(e.input.slice(0, 300))}</div><div>→ ${esc(e.target)}</div></dd>`).join("")}
+          ${Object.keys(c.compat?.label_map || {}).length ? `<dt>Метки</dt><dd>${Object.entries(c.compat.label_map).map(([a, b]) => `${esc(a)} → ${esc(b)}`).join(", ")}</dd>` : ""}
+          ${issues.length ? `<dt>Замечания</dt><dd class="warn">${esc(issues.join("; "))}</dd>` : ""}
+        </dl>
+        ${Object.keys(c.llm_scores || {}).length ? `<div class="tbl" style="margin-top:8px"><table>${Object.entries(c.llm_scores).map(([k, v]) => `<tr><td>${esc(CRITERIA[k] || k)}</td><td class="num">${v.score} из 5</td><td>${esc(v.reason)}</td></tr>`).join("")}</table></div>` : ""}`;
+      row.append(detailsEl(`${card.id}:${c.hf_id}`, "Почему такая оценка", det));
+      list.append(row);
+    });
+    div.append(list);
+    if (!card.resolved) {
+      const a = el(`<div class="actions"></div>`);
+      a.append(btn("Ничего не подошло", () => act(card, "none_fit", {})), fileButton("Загрузить свой файл…"));
+      div.append(a);
+    }
+    return div;
+  },
+
+  prep(card, p) {
+    const r = p.recipe, b = r.profile_before || {}, a = r.profile_after || {};
+    const OPS = {
+      map_schema: o => `колонки: ${schemaText(o)}${o.label_map ? `; метки переименованы (${Object.keys(o.label_map).length})` : ""}`,
+      dedupe: o => o.mode === "exact" ? "удалены точные дубликаты" : `удалены почти-дубликаты (порог сходства ${o.threshold})`,
+      filter: o => `фильтр: ${({ input_len: "длина входа", target_len: "длина ответа", language: "язык", label: "метка", is_dupe: "дубликат" })[o.field] || o.field} ${o.operator} ${Array.isArray(o.value) ? o.value.join(", ") : o.value}`,
+      drop_label_noise: o => `удалены подозрительные метки (не больше ${pct(o.max_fraction)} train)`,
+      rebalance: o => `${o.method === "undersample" ? "урезаны крупные классы" : "повторены редкие классы"} до соотношения ${o.max_ratio}:1`,
+      augment: o => `добавлено ${o.n_rows} синтетических строк (${({ llm: "генерация LLM", deterministic: "синонимы и перестановки слов", hybrid: "гибрид" })[o.method]})`,
+      clean_text: o => `почищен текст: ${[o.strip_html && "HTML", o.remove_urls && "URL", o.max_char_repeat && `повторы символов > ${o.max_char_repeat}`, o.collapse_whitespace && "пробелы"].filter(Boolean).join(", ")}`,
+      map_labels: o => `метки: ${Object.entries(o.mapping).map(([a, b]) => `${a} → ${b}`).join(", ")}`,
+    };
+    const langs = Object.entries(a.language_share || {}).slice(0, 3).map(([k, v]) => `${k} ${pct(v)}`).join(", ");
+    const div = el(`<div>
+      ${p.mass_removal ? `<p class="warn" style="margin:0 0 10px">Рецепт удаляет ${pct(r.removed_fraction)} train. Проверьте, что это ожидаемо.</p>` : ""}
+      <dl class="kv">
+        <dt>Строк в train</dt><dd class="num">${(b.n_rows ?? 0).toLocaleString("ru")} → ${(a.n_rows ?? 0).toLocaleString("ru")}${r.removed_fraction ? ` <span class="muted">(удалено ${pct(r.removed_fraction)})</span>` : ""}${a.n_synthetic ? ` <span class="muted">· синтетических ${a.n_synthetic}</span>` : ""}</dd>
+        ${b.imbalance_ratio ? `<dt>Дисбаланс классов</dt><dd class="num">${b.imbalance_ratio}× → ${a.imbalance_ratio}×</dd>` : ""}
+        <dt>Дубликаты / пустые</dt><dd class="num">${b.n_exact_dupes} / ${b.n_empty} → ${a.n_exact_dupes} / ${a.n_empty}</dd>
+        ${langs ? `<dt>Языки</dt><dd>${esc(langs)}</dd>` : ""}
+        <dt>Кто составил</dt><dd>${r.built_by === "agent" ? "агент подготовки данных и правила" : "статистические правила"}</dd>
+      </dl>
+      <ol class="ops small">${r.ops.map(o => `<li>${esc((OPS[o.op] || (() => o.op))(o))}</li>`).join("")}</ol>
+      <p class="small muted" style="margin:8px 0 0">test отложен и закрыт до финальной оценки; рецепт меняет только train.</p>
+    </div>`);
+    if (!card.resolved && state.settings.mode === "expert") {
+      const ops = r.ops.filter(o => o.op !== "map_schema");
+      const ta = el(`<textarea data-k="ops" rows="6" style="width:100%;font:12px/1.4 var(--mono)">${esc(draft(card, "ops", JSON.stringify(ops, null, 2)))}</textarea>`);
+      ta.addEventListener("input", () => ((drafts[card.id] ||= {}).ops = ta.value));
+      const ed = el(`<div></div>`);
+      ed.append(ta);
+      const apply = btn("Применить правки рецепта", () => {
+        let parsed; try { parsed = JSON.parse(ta.value); } catch (e) { cardErrors[card.id] = "Некорректный JSON: " + e.message; render(); return; }
+        act(card, "edit_recipe", { ops: parsed });
+      });
+      const a = el(`<div class="actions"></div>`); a.append(apply);
+      ed.append(a);
+      div.append(detailsEl(`${card.id}:edit`, "Править операции рецепта (эксперт)", ed));
+    }
+    if (!card.resolved) {
+      const x = el(`<div class="actions"></div>`);
+      x.append(btn("Подтвердить", () => act(card, "confirm_prep"), "primary"), btn("Выбрать другой датасет", () => act(card, "other_dataset")));
+      div.append(x);
+    }
+    return div;
+  },
+
+  augment(card, p) {
+    const how = { llm: "генерация языковой моделью по образцам из датасета", deterministic: "перестановки и удаления слов в существующих примерах", hybrid: "генерация LLM и перестановки слов" }[p.method] || p.method;
+    const div = el(`<div><dl class="kv">
+      <dt>Способ</dt><dd>${esc(how)}</dd><dt>Объём</dt><dd>около ${p.n_rows} строк</dd>
+      <dt>Уверенность агента</dt><dd>${num(p.confidence, 2)}</dd></dl>
+      <p class="small muted" style="margin:8px 0 0">Синтетические строки помечаются и попадают только в train.</p></div>`);
+    if (!card.resolved) {
+      const x = el(`<div class="actions"></div>`);
+      x.append(btn("Сгенерировать", () => act(card, "approve_augment"), "primary"), btn("Обойтись без синтеза", () => act(card, "decline_augment")));
+      div.append(x);
+    }
+    return div;
+  },
+
+  config(card, p) {
+    const c = p.config, pilot = p.pilot || {};
+    const editable = p.editable && !card.resolved;
+    const adapter = c.lora ? `LoRA, r = ${c.lora.r}, α = ${c.lora.alpha}${c.lora.variant !== "lora" ? `, ${c.lora.variant}` : ""}` :
+      `P-tuning, ${c.ptuning.num_virtual_tokens} виртуальных токенов, ${c.ptuning.encoder_reparameterization_type}-энкодер ${c.ptuning.encoder_hidden_size}`;
+    const est = pilot.estimated_time_s ? (pilot.estimated_time_s < 3600 ? `до ${Math.ceil(pilot.estimated_time_s / 60)} мин` : `до ${(pilot.estimated_time_s / 3600).toFixed(1)} ч`) : "—";
+    const div = el(`<div></div>`);
+    const pilotOk = pilot.status === "ok";
+    div.append(el(`<div>
+      <p style="margin:0 0 10px" class="${pilotOk ? "" : "bad"}">${pilotOk
+        ? `Пробный прогон прошёл. Оценка времени: <b>${esc(est)}</b>${pilot.peak_mem_gb ? `, пик памяти ${num(pilot.peak_mem_gb, 1)} ГБ` : ""}.`
+        : `Пробный прогон не прошёл (${esc(pilot.status)}). ${esc((pilot.message || "").slice(0, 300))}`}</p>
+      ${(pilot.fixes || []).length ? `<p class="small" style="margin:0 0 10px">Автоматически исправлено: ${esc(pilot.fixes.join("; "))}</p>` : ""}
+    </div>`));
+    if (editable) {
+      const f = [
+        ["lr", "Learning rate", c.optim.lr, "number", "any"],
+        ["epochs", "Эпох (верхняя граница)", c.schedule.epochs, "number", "1"],
+        ...(c.lora ? [["r", "LoRA r", c.lora.r, "number", "1"], ["alpha", "LoRA α", c.lora.alpha, "number", "1"]] :
+          [["num_virtual_tokens", "Виртуальных токенов", c.ptuning.num_virtual_tokens, "number", "1"]]),
+        ["micro_batch", "Micro-batch", c.schedule.micro_batch, "number", "1"],
+        ["grad_accum", "Накопление градиента", c.schedule.grad_accum, "number", "1"],
+        ["max_seq_len", "Длина последовательности", c.max_seq_len, "number", "16"],
+      ];
+      const form = el(`<div class="form">${f.map(([k, label, v, type, step]) =>
+        `<label for="${k}-${card.id}">${label}</label><input id="${k}-${card.id}" data-k="${k}" type="${type}" step="${step}" value="${esc(draft(card, k, v))}" style="width:140px">`).join("")}
+        <label>Модель</label><div class="small">${esc(c.base_model_id)} · ${esc(c.backend)} · квантизация ${esc(c.quantization)}</div></div>`);
+      bindDraft(card, form);
+      div.append(form, el(`<p class="small muted" style="margin:8px 0 0">Значения проверяются: диапазоны, имена модулей из реестра, оценка памяти.</p>`));
+      div._collect = () => {
+        const v = k => { const i = form.querySelector(`[data-k="${k}"]`); return i ? +i.value : undefined; };
+        const out = { optim: { ...c.optim, lr: v("lr") }, schedule: { ...c.schedule, epochs: v("epochs"), micro_batch: v("micro_batch"), grad_accum: v("grad_accum") }, max_seq_len: v("max_seq_len") };
+        if (c.lora) out.lora = { ...c.lora, r: v("r"), alpha: v("alpha") };
+        else out.ptuning = { ...c.ptuning, num_virtual_tokens: v("num_virtual_tokens") };
+        return out;
+      };
+    } else {
+      div.append(el(`<dl class="kv">
+        <dt>Модель</dt><dd>${esc(c.base_model_id)}${c.quantization === "4bit" ? " в 4 битах (QLoRA)" : ""}</dd>
+        <dt>Адаптер</dt><dd>${esc(adapter)}</dd>
+        <dt>Learning rate</dt><dd class="num">${sci(c.optim.lr)}</dd>
+        <dt>Эпох</dt><dd>${c.schedule.max_steps ? `не больше ${c.schedule.max_steps} шагов (бюджет GPU-часов)` : `до ${c.schedule.epochs}`}, с ранней остановкой</dd>
+        <dt>Батч</dt><dd class="num">${c.schedule.micro_batch} × ${c.schedule.grad_accum} = ${c.schedule.micro_batch * c.schedule.grad_accum}</dd>
+        <dt>Длина</dt><dd class="num">${c.max_seq_len} токенов</dd>
+      </dl>`));
+    }
+    const rationale = `<ul class="ops small">${c.rationales.map(r => `<li><b>${esc(r.param)}</b> = ${esc(typeof r.value === "object" ? JSON.stringify(r.value) : r.value)} — ${esc(r.reason)}${r.evidence.length ? ` <span class="muted">(${r.evidence.map(e => esc(e.ref)).join(", ")})</span>` : ""}</li>`).join("")}</ul>`;
+    div.append(detailsEl(`${card.id}:why`, `Почему такие значения (${c.rationales.length})`, rationale));
+    if ((p.notes || []).length) div.append(detailsEl(`${card.id}:notes`, "Поправки защитного слоя", `<ul class="ops small">${p.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>`));
+    if (p.baselines_val && Object.keys(p.baselines_val).length) {
+      const primary = state.spec?.primary_metric;
+      const cols = Object.keys(Object.values(p.baselines_val)[0] || {});
+      div.append(detailsEl(`${card.id}:base`, "С чем будем сравнивать (baseline на val)",
+        `<div class="tbl"><table><tr><th></th>${cols.map(k => `<th class="num">${esc(mName(k))}</th>`).join("")}</tr>${Object.entries(p.baselines_val).map(([k, m]) =>
+          `<tr><td>${esc(bName(k))}</td>${cols.map(x => `<td class="num">${num(m[x])}</td>`).join("")}</tr>`).join("")}</table></div>`));
+    }
+    if (!card.resolved) {
+      const x = el(`<div class="actions"></div>`);
+      x.append(btn("Запустить обучение", () => act(card, "confirm_config", { config: div._collect ? div._collect() : null }), "primary"),
+        btn("Подобрать заново", () => act(card, "recompute_config")));
+      if (p.reusable_run) x.append(btn("Взять готовый адаптер", () => act(card, "reuse_adapter", { run_id: p.reusable_run }), "", { title: `Запуск ${p.reusable_run} с той же постановкой, данными и конфигурацией` }));
+      div.append(x);
+    }
+    return div;
+  },
+
+  round(card, p) {
+    const r = p.report, primary = p.primary_metric;
+    const rec = { finish: "остановиться и посчитать метрики на test", continue: `продолжить ещё на ${p.default_extra_epochs} эп.`, restart: "перезапустить с другими параметрами" }[r.recommendation];
+    const div = el(`<div>
+      ${metricsTable("Адаптер (val)", r.val_metrics, r.baselines_val, primary)}
+      <p style="margin:12px 0 0">${esc(r.diagnosis)}</p>
+      <p class="small muted" style="margin:6px 0 0">Сделано эпох: ${num(r.epochs_done, 1)}. Проверка качества: ${esc(humanize(p.sufficiency_reason))}.</p>
+      ${!card.resolved ? `<p style="margin:10px 0 0">Рекомендация: <b>${esc(rec)}</b>.</p>` : ""}
+    </div>`);
+    if (!card.resolved) {
+      const x = el(`<div class="actions"></div>`);
+      const isRec = k => r.recommendation === k ? "primary" : "";
+      x.append(btn("Остановить и оценить на test", () => act(card, "round_finish"), isRec("finish")));
+      const n = el(`<input type="number" min="1" max="20" value="${esc(draft(card, "epochs", p.default_extra_epochs))}" style="width:64px" aria-label="Сколько эпох добавить" data-k="epochs">`);
+      n.addEventListener("input", () => ((drafts[card.id] ||= {}).epochs = n.value));
+      const cont = btn("Продолжить ещё на", () => act(card, "round_continue", { epochs: +n.value }), isRec("continue"),
+        { disabled: p.max_rounds_reached, title: p.max_rounds_reached ? "Достигнут лимит раундов" : "" });
+      const grp = el(`<span style="display:inline-flex;gap:6px;align-items:center"></span>`);
+      grp.append(cont, n, el(`<span class="small muted">эп.</span>`));
+      x.append(grp, btn("Перезапустить с другими параметрами", () => act(card, "round_restart"), isRec("restart")));
+      div.append(x);
+    }
+    return div;
+  },
+
+  result(card, p) {
+    const rep = p.report || {}, primary = p.primary_metric || state.spec?.primary_metric;
+    const div = el(`<div>${metricsTable("Адаптер (test)", rep.metrics, rep.baselines, primary)}
+      ${rep.unparsed_fraction ? `<p class="warn small" style="margin:8px 0 0">Ответов вне набора меток: ${pct(rep.unparsed_fraction)} — они считаются ошибками.</p>` : ""}
+      ${rep.diagnosis ? `<p style="margin:12px 0 0">${esc(rep.diagnosis)}</p>` : ""}
+      <dl class="kv small" style="margin-top:12px">${rep.latency_ms ? `<dt>Задержка ответа</dt><dd class="num">${num(rep.latency_ms, 0)} мс на запрос${state.spec?.constraints?.max_latency_ms ? ` (ограничение ${state.spec.constraints.max_latency_ms} мс)` : ""}</dd>` : ""}<dt>Адаптер</dt><dd><code>${esc(p.adapter_path)}</code></dd>
+      <dt>Запуск</dt><dd><code>${esc(p.run_id)}</code>${p.reused ? " (взят готовый)" : ""}</dd></dl></div>`);
+    const pc = Object.entries(rep.per_class || {});
+    if (pc.length) div.append(detailsEl(`${card.id}:pc`, "По классам",
+      `<div class="tbl"><table><tr><th>Класс</th><th class="num">Precision</th><th class="num">Recall</th><th class="num">F1</th><th class="num">Примеров</th></tr>${pc.map(([k, m]) =>
+        `<tr><td>${esc(k)}</td><td class="num">${num(m.precision)}</td><td class="num">${num(m.recall)}</td><td class="num">${num(m.f1)}</td><td class="num">${m.support}</td></tr>`).join("")}</table></div>`));
+    const ex = list => list.map(e => `<dl class="example kv"><dt>Вход</dt><dd>${esc(e.input)}</dd><dt>Эталон</dt><dd>${esc(e.target)}</dd><dt>Ответ</dt><dd>${esc(e.prediction)}</dd></dl>`).join("");
+    if (rep.examples_wrong?.length) div.append(detailsEl(`${card.id}:bad`, `Примеры ошибок (${rep.examples_wrong.length})`, ex(rep.examples_wrong)));
+    if (rep.examples_correct?.length) div.append(detailsEl(`${card.id}:ok`, `Примеры верных ответов (${rep.examples_correct.length})`, ex(rep.examples_correct)));
+    return div;
+  },
+
+  info(card, p) {
+    const div = el(`<div></div>`);
+    if (p.log_tail) div.append(detailsEl(`${card.id}:log`, "Последние строки журнала обучения", `<pre style="white-space:pre-wrap;font:11px/1.4 var(--mono);margin:0">${esc(p.log_tail)}</pre>`));
+    if (p.retry && !state.busy && card.id === lastCardId()) { const a = el(`<div class="actions"></div>`); a.append(btn("Повторить", () => act(null, "retry"), "primary")); div.append(a); }
+    return div.childNodes.length ? div : null;
+  },
+};
+
+const lastCardId = () => [...state.items].reverse().find(i => i.card)?.card.id;
+
+function renderCard(card) {
+  const builder = CARDS[card.kind];
+  if (!builder) return null;
+  const body = builder(card, card.payload);
+  if (card.kind === "info") {
+    if (!body) return null;
+    const w = el(`<div style="margin-top:8px"></div>`); w.append(body); return w;
+  }
+  const open = card.blocking && !card.resolved;
+  const expandKey = `card:${card.id}`;
+  const collapsed = card.resolved && card.kind !== "result" && !openDetails.has(expandKey);
+  const box = el(`<section class="card ${open ? "open" : ""} ${collapsed ? "collapsed" : ""}"></section>`);
+  const tag = open ? "Нужно ваше решение" : card.resolved ? resolutionText(card) : (card.blocking ? "" : "Для сведения");
+  const head = el(`<div class="card-head"><h3>${esc(CARD_TITLES[card.kind])}</h3><span class="tag">${esc(tag)}</span></div>`);
+  if (card.resolved && card.kind !== "result") {
+    head.append(btn(collapsed ? "Показать" : "Свернуть", () => {
+      collapsed ? openDetails.add(expandKey) : openDetails.delete(expandKey); render();
+    }, "toggle"));
+  }
+  box.append(head);
+  const b = el(`<div class="card-body"></div>`); b.append(body); box.append(b);
+  if (cardErrors[card.id]) box.querySelector(".card-body").append(el(`<div class="card-error" role="alert">${esc(cardErrors[card.id])}</div>`));
+  return box;
+}
+
+// ---------------------------------------------------------------- рендер
+
+function renderSteps() {
+  const idx = stageOf(state.step);
+  const failed = state.step === "FAILED";
+  $("#steps").innerHTML = STAGES.map(([name], i) => {
+    const cls = failed && i === lastStageIdx ? "failed current" : i < idx || state.step === "DONE" ? "done" : i === idx ? "current" : "";
+    return `<li class="${cls}" ${i === idx ? 'aria-current="step"' : ""}><span class="n">${i + 1}</span><span class="label">${esc(name)}</span></li>`;
+  }).join("");
+  if (idx >= 0) lastStageIdx = idx;
+}
+
+const COMPOSE = {
+  INTAKE: ["Опишите задачу: что на входе, что нужно получить, на каком языке", true],
+  SPEC_CONFIRM: ["Напишите, что поправить в постановке", true],
+  DATASET_CHOICE: ["Напишите, чего не хватает в найденных датасетах", true],
+  DONE: ["Опишите новую задачу", true],
+  FAILED: ["Опишите задачу заново или нажмите «Повторить» выше", true],
+};
+
+function render() {
+  if (!state) return;
+  renderSteps();
+  document.querySelectorAll("#modeSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === state.settings.mode)));
+  const log = $("#log"), atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 120;
+  const thread = $("#thread");
+  thread.innerHTML = "";
+  const [hint, enabled] = COMPOSE[state.step] || ["Сейчас ввод не нужен — решение принимается в карточке выше", false];
+  // варианты-кнопки — только у последнего вопроса без ответа: старые варианты ушли бы ответом на другой шаг
+  const lastUser = state.items.map(i => i.role).lastIndexOf("user");
+  const lastAsk = state.items.findLastIndex(i => i.options?.length);
+  state.items.forEach((item, idx) => {
+    if (!item.text && !item.card) return;
+    const m = el(`<div class="msg ${item.role}"></div>`);
+    if (item.text) m.append(document.createTextNode(item.text));
+    if (item.options?.length && idx === lastAsk && idx > lastUser && enabled) {
+      const o = el(`<div class="opts"></div>`);
+      item.options.forEach(opt => o.append(btn(opt, () => send(opt), "", { disabled: !!state.busy })));
+      m.append(o);
+    }
+    if (item.card) { const c = renderCard(item.card); if (c) m.append(c); }
+    thread.append(m);
+  });
+  if (state.busy) thread.append(renderBusy());
+  if (atBottom) log.scrollTop = log.scrollHeight;
+
+  const canType = enabled && !state.busy;
+  const ta = $("#text");
+  ta.disabled = !canType; ta.placeholder = state.busy ? "Подождите, система работает…" : hint;
+  $("#sendBtn").disabled = !canType || pending;
+  $("#composeHint").textContent = state.user_dataset_path ? `Ваш датасет загружен: ${state.user_dataset_path.split(/[\\/]/).pop()}` : "";
+  const up = $("#composeUpload"); up.innerHTML = "";
+  if (state.step === "INTAKE" && !state.user_dataset_path && !state.busy) up.append(fileButton("Свой датасет"));
+
+  renderSummary();
+  renderTraining();
+}
+
+let hardware = null;
+async function loadHardware() {
+  try { hardware = (await api("/api/hardware")).hardware; } catch { hardware = null; }
+  renderSummary();
+}
+
+function hardwareBlock() {
+  if (!hardware) return "";
+  const h = hardware;
+  return `<dl class="kv small" style="margin-bottom:10px">
+    <dt>GPU</dt><dd>${h.gpu_name ? `${esc(h.gpu_name)}, ${h.vram_gb} ГБ` : "нет — обучение недоступно"}${h.measured_tflops ? ` · ${h.measured_tflops} TFLOPS (замер)` : ""}</dd>
+    <dt>RAM / диск</dt><dd>${h.ram_gb} ГБ / ${h.disk_free_gb} ГБ свободно</dd></dl>`;
+}
+
+function limitsForm() {
+  const l = state.settings.limits;
+  const box = el(`<div class="form" style="margin-top:12px">
+    <label for="lim-int">Вмешательств монитора</label><input id="lim-int" type="number" min="0" max="20" value="${l.max_monitor_interventions}" style="width:80px">
+    <label for="lim-rounds">Раундов, не больше</label><input id="lim-rounds" type="number" min="1" max="20" value="${l.max_rounds}" style="width:80px">
+    <label>Разрешено монитору</label><div class="small">${[["patch", "поправки lr/градиента"], ["stop_early", "досрочная остановка"]].map(([k, t]) =>
+      `<label style="display:block"><input type="checkbox" data-act="${k}" ${l.allowed_monitor_actions.includes(k) ? "checked" : ""}> ${t}</label>`).join("")}</div>
+  </div>`);
+  const save = btn("Сохранить лимиты", async () => {
+    const allowed = ["continue", ...[...box.querySelectorAll("[data-act]")].filter(i => i.checked).map(i => i.dataset.act)];
+    try {
+      state = await api(`/api/sessions/${sid}/settings`, { method: "POST", body: JSON.stringify({ limits: {
+        max_monitor_interventions: +box.querySelector("#lim-int").value, max_rounds: +box.querySelector("#lim-rounds").value,
+        allowed_monitor_actions: allowed } }) });
+      render();
+    } catch (e) { toast(e.message); }
+  });
+  const wrap = el(`<div></div>`); wrap.append(box); const a = el(`<div class="actions"></div>`); a.append(save); wrap.append(a);
+  return detailsEl("limits", "Лимиты агента мониторинга (эксперт)", wrap);
+}
+
+function renderSummary() {
+  const s = state.spec, d = state.dataset, c = state.pending_config;
+  const sum = $("#summary");
+  if (!s) {
+    sum.innerHTML = hardwareBlock() + `<p class="muted small" style="margin:0">Здесь появятся постановка, датасет и конфигурация, когда они будут выбраны.</p>`;
+    if (state.settings.mode === "expert") sum.append(limitsForm());
+    return;
+  }
+  sum.innerHTML = hardwareBlock() + `<dl class="kv small">
+    <dt>Задача</dt><dd>${esc(s.description)}</dd>
+    <dt>Модель</dt><dd>${esc(s.base_model_id)}</dd>
+    <dt>Метрика</dt><dd>${esc(mName(s.primary_metric))}</dd>
+    ${d ? `<dt>Датасет</dt><dd>${esc(d.hf_id.replace(/^user:/, ""))}</dd>` : ""}
+    ${c ? `<dt>Адаптер</dt><dd>${c.lora ? `LoRA r = ${c.lora.r}` : `P-tuning, ${c.ptuning.num_virtual_tokens} ток.`}${c.quantization === "4bit" ? ", 4 бита" : ""}</dd><dt>Learning rate</dt><dd class="num">${sci(c.optim.lr)}</dd>` : ""}
+    <dt>Режим</dt><dd>${state.settings.mode === "expert" ? "Эксперт" : "Авто"}</dd>
+  </dl>`;
+  if (state.settings.mode === "expert") sum.append(limitsForm());
+}
+
+// ---------------------------------------------------------------- обучение и графики
+
+function bestBaseline() {
+  const primary = state?.spec?.primary_metric;
+  for (const item of [...(state?.items || [])].reverse()) {
+    const p = item.card?.payload;
+    const b = p?.report?.baselines_val || p?.baselines_val;
+    if (b) {
+      const scored = Object.entries(b).filter(([, m]) => m[primary] != null);
+      if (!scored.length) return null;
+      const [name, m] = scored.reduce((a, x) => x[1][primary] > a[1][primary] ? x : a);
+      return { name: bName(name), value: m[primary] };
+    }
+  }
+  return null;
+}
+
+function niceTicks(lo, hi, n = 4) {
+  const span = hi - lo || Math.abs(hi) || 1;
+  const step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => s >= step0);
+  const ticks = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) ticks.push(+v.toPrecision(12));
+  return ticks;
+}
+
+// Линейный график: одна ось Y, тонкие линии, пунктир — опорное значение, подсказка с перекрестием при наведении
+function lineChart(box, { series, ref, yFmt = v => num(v, 2) }) {
+  const W = Math.max(240, box.clientWidth || 360), H = 150, L = 40, R = 8, T = 8, B = 22;
+  const pts = series.flatMap(s => s.points);
+  if (!pts.length) { box.innerHTML = `<div class="small muted" style="height:${H}px;display:grid;place-items:center;border:1px dashed var(--line);border-radius:6px">Данных пока нет</div>`; return; }
+  const xs = pts.map(p => p[0]);
+  let y0 = Math.min(...pts.map(p => p[1]), ref ? ref.value : Infinity), y1 = Math.max(...pts.map(p => p[1]), ref ? ref.value : -Infinity);
+  if (y0 === y1) { y0 -= 0.5; y1 += 0.5; }
+  const pad = (y1 - y0) * 0.06; y0 -= pad; y1 += pad;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs) === x0 ? x0 + 1 : Math.max(...xs);
+  const sx = x => L + (x - x0) / (x1 - x0) * (W - L - R), sy = y => T + (1 - (y - y0) / (y1 - y0)) * (H - T - B);
+  const yt = niceTicks(y0, y1), xt = niceTicks(x0, x1, 4).filter(v => v >= x0 && v <= x1);
+  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(series.map(s => s.name).join(", "))}">`;
+  svg += yt.map(v => `<line x1="${L}" x2="${W - R}" y1="${sy(v)}" y2="${sy(v)}" stroke="var(--line)" stroke-width="1"/><text x="${L - 6}" y="${sy(v) + 3}" text-anchor="end">${yFmt(v)}</text>`).join("");
+  svg += xt.map(v => `<text x="${sx(v)}" y="${H - 6}" text-anchor="middle">${Math.round(v)}</text>`).join("");
+  svg += `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--line-strong)"/>`;
+  if (ref) svg += `<line x1="${L}" x2="${W - R}" y1="${sy(ref.value)}" y2="${sy(ref.value)}" stroke="var(--ref)" stroke-dasharray="4 3" stroke-width="1.5"/>`;
+  for (const s of series) {
+    if (!s.points.length) continue;
+    const d = s.points.map((p, i) => `${i ? "L" : "M"}${sx(p[0]).toFixed(1)},${sy(p[1]).toFixed(1)}`).join("");
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (s.points.length <= 40 || s.markers) svg += s.points.map(p => `<circle cx="${sx(p[0])}" cy="${sy(p[1])}" r="${s.markers ? 3 : 0}" fill="${s.color}" stroke="var(--surface)" stroke-width="1.5"/>`).join("");
+  }
+  svg += `<g class="hover" visibility="hidden"><line y1="${T}" y2="${H - B}" stroke="var(--ink-3)" stroke-width="1"/>${series.map(s => `<circle r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`).join("")}</g>`;
+  svg += `<rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/></svg>`;
+  box.innerHTML = svg;
+  const tip = el(`<div class="tip" hidden></div>`); box.append(tip);
+  const root = box.querySelector("svg"), hov = root.querySelector(".hover"), hit = root.querySelector("rect");
+  const steps = [...new Set(xs)].sort((a, b) => a - b);
+  hit.addEventListener("pointermove", e => {
+    const r = root.getBoundingClientRect(), mx = (e.clientX - r.left) * (W / r.width);
+    const x = steps.reduce((a, b) => Math.abs(sx(b) - mx) < Math.abs(sx(a) - mx) ? b : a);
+    hov.setAttribute("visibility", "visible");
+    hov.querySelector("line").setAttribute("x1", sx(x)); hov.querySelector("line").setAttribute("x2", sx(x));
+    const rows = [];
+    series.forEach((s, i) => {
+      const c = hov.querySelectorAll("circle")[i];
+      const near = s.points.reduce((a, p) => !a || Math.abs(p[0] - x) < Math.abs(a[0] - x) ? p : a, null);
+      if (near && Math.abs(near[0] - x) <= (x1 - x0) * 0.04) {
+        c.setAttribute("cx", sx(near[0])); c.setAttribute("cy", sy(near[1])); c.setAttribute("visibility", "visible");
+        rows.push(`<div class="row"><i style="background:${s.color}"></i>${esc(s.name)}<b>${num(near[1], 4)}</b></div>`);
+      } else c.setAttribute("visibility", "hidden");
+    });
+    if (ref) rows.push(`<div class="row"><i style="background:var(--ref)"></i>${esc(ref.name)}<b>${num(ref.value, 4)}</b></div>`);
+    tip.innerHTML = `<div class="muted">шаг ${x}</div>${rows.join("")}`;
+    tip.hidden = false;
+    const px = sx(x) / W * r.width;
+    tip.style.left = `${Math.min(px + 12, r.width - tip.offsetWidth - 4)}px`; tip.style.top = "4px";
+  });
+  hit.addEventListener("pointerleave", () => { hov.setAttribute("visibility", "hidden"); tip.hidden = true; });
+}
+
+// ---------------------------------------------------------------- что происходит сейчас и сколько осталось
+
+const clock = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${m}:${x}`; };
+const since = t => (Date.now() - (typeof t === "number" ? t * 1000 : new Date(t))) / 1000;
+const dur = s => s < 45 ? "меньше минуты" : s < 5400 ? `≈ ${Math.max(1, Math.round(s / 60))} мин` : `≈ ${(s / 3600).toFixed(1)} ч`;
+
+// Осталось до конца раунда: по фактическому темпу процесса (eta_s последней точки минус время с неё), до первых точек — по пилоту
+function roundEta() {
+  if (state?.step !== "TRAINING") return null;
+  const started = [...events].reverse().find(e => e.type === "round_started");
+  if (!started) return null;
+  const last = [...metrics].reverse().find(m => m.eta_s != null && new Date(m.time) / 1000 >= started.time);
+  if (last) return { s: Math.max(0, last.eta_s - since(last.time)), src: "по темпу обучения", step: last.step, max: last.max_step };
+  if (started.estimated_s) return { s: Math.max(0, started.estimated_s - since(started.time)), src: "по пилоту, с загрузкой модели" };
+  return null;
+}
+const endAt = s => new Date(Date.now() + s * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+
+function renderBusy() {
+  const b = el(`<div class="busy" role="status"></div>`);
+  const eta = roundEta();
+  b.innerHTML = `<div class="busy-head"><span class="spin" aria-hidden="true"></span><b>${esc(state.busy[0].toUpperCase() + state.busy.slice(1))}</b>`
+    + (state.busy_since ? `<span class="muted" data-since="${esc(state.busy_since)}">${clock(since(state.busy_since))}</span>` : "")
+    // метрики приходят по SSE после состояния — «осталось» заполняет и показывает таймер
+    + (state.step === "TRAINING" ? `<span class="muted" data-eta-wrap${eta ? "" : " hidden"}>· осталось <span data-eta>${eta ? dur(eta.s) : ""}</span></span>` : "") + `</div>`;
+  const items = state.activity || [];
+  if (items.length) {
+    const ol = el(`<ol class="act"></ol>`);
+    let who = null;
+    items.forEach((a, i) => {
+      if (a.who && a.who !== who) ol.append(el(`<li class="who">${esc(a.who)}</li>`));
+      who = a.who;
+      ol.append(el(`<li class="${a.live ? "live" : i === items.length - 1 ? "cur" : ""}">${a.live ? `<span class="dots">${esc(a.text)}</span> <span data-since="${esc(a.time)}">${clock(since(a.time))}</span>`
+        : esc(a.text)}${a.result ? ` <span class="res">→ ${esc(a.result)}</span>` : ""}</li>`));
+    });
+    b.append(ol);
+  }
+  return b;
+}
+
+// таймеры и обратный отсчёт — без перерисовки страницы
+setInterval(() => {
+  document.querySelectorAll("[data-since]").forEach(e => { e.textContent = clock(since(e.dataset.since)); });
+  const eta = roundEta();
+  document.querySelectorAll("[data-eta]").forEach(e => { e.textContent = eta ? dur(eta.s) : "—"; });
+  document.querySelectorAll("[data-eta-wrap]").forEach(e => { e.hidden = !eta; });
+  document.querySelectorAll("[data-eta-end]").forEach(e => { e.textContent = eta ? endAt(eta.s) : "—"; });
+}, 1000);
+
+const ACTIVE_STEPS = ["TRAINING", "ROUND_REVIEW", "EVAL", "DONE"];
+function renderTraining() {
+  const body = $("#trainBody");
+  if (!state?.run_id || (!metrics.length && !ACTIVE_STEPS.includes(state.step))) {
+    body.innerHTML = `<p class="muted small" style="margin:0">Графики появятся после запуска обучения. Пробный прогон и baseline'ы считаются на этапе «Конфигурация».</p>`;
+    return;
+  }
+  const primary = state.spec?.primary_metric;
+  const lastTr = [...metrics].reverse().find(m => m.train_loss != null);
+  const last = metrics[metrics.length - 1];
+  const lastEval = [...metrics].reverse().find(m => m.val_metrics && primary in m.val_metrics);
+  const started = [...events].reverse().find(e => e.type === "round_started");
+  const eta = roundEta();
+  const stat = (k, v, title = "") => `<div class="stat"${title ? ` title="${esc(title)}"` : ""}><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const training = state.step === "TRAINING";
+  const lastStep = [...metrics].reverse().find(m => m.max_step);
+  const pct = lastStep && started && new Date(lastStep.time) / 1000 >= started.time ? Math.min(100, 100 * lastStep.step / lastStep.max_step) : null;
+  body.innerHTML = `
+    ${started ? `<div class="progress-label"><span>Раунд ${started.round}${pct != null ? ` · шаг ${lastStep.step} из ${lastStep.max_step}` : training ? " · загрузка модели…" : ""}</span><span>${pct != null ? `${Math.floor(pct)}%` : ""}</span></div>
+    <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.floor(pct ?? 0)}"><i style="width:${pct ?? 0}%"></i></div>` : ""}
+    <div class="stats">
+      ${stat("Эпоха", last ? `${num(last.epoch, 2)}${started ? ` / ${num(started.target_epoch, 0)}` : ""}` : "—")}
+      ${stat(eta?.src.startsWith("по пилоту") ? "Осталось (по пилоту)" : "Осталось", eta ? `<span data-eta>${dur(eta.s)}</span>` : "—", eta ? `До конца раунда, ${eta.src}; без финальной оценки на test` : "")}
+      ${stat("Окончание", eta ? `<span data-eta-end>${endAt(eta.s)}</span>` : "—")}
+      ${stat("Train loss", num(lastTr?.train_loss))}
+      ${stat(esc(mName(primary)), num(lastEval?.val_metrics?.[primary]))}
+      ${stat("Память", lastTr?.gpu_mem_gb ? `${num(lastTr.gpu_mem_gb, 1)} ГБ` : "—")}
+    </div>
+    <div class="chart-title"><span>Loss</span><span class="legend"><span><i style="background:var(--series-1)"></i>train</span><span><i style="background:var(--series-2)"></i>val</span></span></div>
+    <div class="chart-box" id="lossChart"></div>
+    <div class="chart-title"><span>${esc(mName(primary))} на val</span><span class="legend" id="refLegend"></span></div>
+    <div class="chart-box" id="metricChart"></div>
+    <div id="trainControls" class="actions"></div>
+    <details id="tableDetails"><summary>Таблица значений</summary><div id="metricTable"></div></details>
+    <p class="small muted" style="margin:10px 0 0">Подробные графики — MLflow: <code>MLFLOW_ALLOW_FILE_STORE=true mlflow ui --backend-store-uri data/mlruns</code></p>`;
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const ref = bestBaseline();
+  if (ref) $("#refLegend").innerHTML = `<span><i class="dash"></i>лучший baseline</span>`;
+  lineChart($("#lossChart"), { series: [
+    { name: "train loss", color: css("--series-1"), points: metrics.filter(m => m.train_loss != null && Number.isFinite(m.train_loss)).map(m => [m.step, m.train_loss]) },
+    { name: "val loss", color: css("--series-2"), markers: true, points: metrics.filter(m => m.val_loss != null).map(m => [m.step, m.val_loss]) },
+  ] });
+  lineChart($("#metricChart"), { ref, series: [
+    { name: mName(primary), color: css("--series-1"), markers: true, points: metrics.filter(m => m.val_metrics && primary in m.val_metrics).map(m => [m.step, m.val_metrics[primary]]) },
+  ] });
+  const td = $("#tableDetails");
+  if (openDetails.has("metricTable")) td.open = true;
+  td.ontoggle = () => td.open ? openDetails.add("metricTable") : openDetails.delete("metricTable");
+  const evals = metrics.filter(m => m.val_loss != null).slice(-15).reverse();
+  $("#metricTable").innerHTML = evals.length ? `<div class="tbl"><table><tr><th class="num">Шаг</th><th class="num">Эпоха</th><th class="num">Val loss</th><th class="num">${esc(mName(primary))}</th></tr>${evals.map(m =>
+    `<tr><td class="num">${m.step}</td><td class="num">${num(m.epoch, 2)}</td><td class="num">${num(m.val_loss)}</td><td class="num">${num(m.val_metrics?.[primary])}</td></tr>`).join("")}</table></div>` : `<p class="small muted">Оценок на val ещё не было.</p>`;
+
+  const ctl = $("#trainControls");
+  if (training) {
+    if (!confirmAbort) {
+      ctl.append(btn("Остановить с сохранением", () => act(null, "stop_training"), "", { title: "Раунд завершится на ближайшем шаге: сохранится чекпоинт, посчитаются метрики на val" }),
+        btn("Прервать…", () => { confirmAbort = true; renderTraining(); }, "danger"));
+    } else {
+      const row = el(`<div class="confirm-row"><span>Прервать без сохранения? Прогресс раунда будет потерян.</span></div>`);
+      row.append(btn("Прервать", () => { confirmAbort = false; act(null, "abort_training"); }, "danger"), btn("Отмена", () => { confirmAbort = false; renderTraining(); }));
+      ctl.append(row);
+    }
+  } else confirmAbort = false;
+}
+
+function eventItem(e) {
+  switch (e.type) {
+    case "anomaly": return [e.severity === "hard" ? "Сбой" : "Аномалия", `${ANOMALY[e.kind] || e.kind}, шаг ${e.step}`, e.severity === "hard" ? "bad" : "warn"];
+    case "monitor_decision": {
+      const what = e.action === "patch" ? ({ lr_scale: `lr × ${e.patch?.factor}`, grad_clip: `клиппинг градиента ${e.patch?.max_grad_norm}`, eval_every: `оценка каждые ${e.patch?.steps} шагов`, log_every: `лог каждые ${e.patch?.steps} шагов` })[e.patch?.kind]
+        : ({ continue: "продолжаем", stop_early: "досрочная остановка", eval_now: "оценка сейчас", save_now: "чекпоинт сейчас" })[e.action];
+      return ["Монитор", `${what}${e.explanation ? ` — ${e.explanation}` : ""}`, ["stop_early"].includes(e.action) || e.patch?.kind === "lr_scale" ? "warn" : ""];
+    }
+    case "monitor_review": return ["Монитор", `${e.trigger}: ${({ ok: "в порядке", suspicious: "подозрительно", broken: "сломано" })[e.verdict]}${e.explanation ? ` — ${e.explanation}` : ""}`, e.verdict === "ok" ? "" : "warn"];
+    case "round_reattached": return ["Раунд", `${e.round}: наблюдение возобновлено после перезапуска сервиса`, ""];
+    case "monitor_unavailable": return ["Монитор", "агент мониторинга недоступен", "warn"];
+    case "hard_rule": return ["Правило", e.note || ({ nan_resume: "NaN в loss — продолжение с меньшим lr", oom_ladder: "нехватка памяти — меньше батч" })[e.rule] || e.rule, "warn"];
+    case "round_started": return ["Раунд", `${e.round} начат, ${num(e.epochs, 1)} эп.${e.resume_from ? " с чекпоинта" : ""}`, ""];
+    case "round_process_exit": return ["Раунд", `${e.round} завершён: ${({ ok: "успешно", nan: "NaN", oom: "нехватка памяти", aborted: "прерван", error: "ошибка" })[e.status] || e.status}${e.message ? ` — ${e.message}` : ""}`, e.status === "ok" ? "" : "bad"];
+    case "control_applied": return ["Команда", `${({ stop_and_save: "остановка с сохранением", abort: "прерывание", patch: "поправка параметров" })[e.cmd] || e.cmd} на шаге ${e.step}`, ""];
+    case "hung": return ["Зависание", `нет шагов ${Math.round(e.stale_s / 60)} мин`, "bad"];
+    case "test_opened": return ["Test", `открыт для финальной оценки (${e.rows} строк)`, ""];
+    default: return [e.type, "", ""];
+  }
+}
+function renderEvents() {
+  const box = $("#eventlog");
+  if (!events.length) { box.innerHTML = `<li style="display:block;border:0" class="muted small">Пока ничего не произошло.</li>`; return; }
+  box.innerHTML = events.slice(-100).reverse().map(e => {
+    const [kind, text, cls] = eventItem(e);
+    return `<li><span class="kind ${cls}">${esc(kind)}</span><span>${esc(text)}</span></li>`;
+  }).join("");
+}
+
+// ---------------------------------------------------------------- связь и сессии
+
+function connect() {
+  if (es) es.close();
+  metrics = []; events = [];
+  es = new EventSource(`/api/sessions/${sid}/events`);
+  es.onopen = () => { $("#conn").textContent = ""; };
+  es.onerror = () => { $("#conn").textContent = "Нет связи с сервером — переподключаюсь"; };
+  es.addEventListener("state", e => { state = JSON.parse(e.data); render(); });
+  es.addEventListener("run", () => { metrics = []; events = []; renderEvents(); renderTraining(); });
+  es.addEventListener("metrics", e => { metrics.push(...JSON.parse(e.data)); renderTraining(); });
+  es.addEventListener("events", e => { events.push(...JSON.parse(e.data)); renderEvents(); renderTraining(); });
+}
+async function send(text) {
+  if (!text.trim() || pending) return;
+  pending = true;
+  try { state = await api(`/api/sessions/${sid}/message`, { method: "POST", body: JSON.stringify({ text }) }); }
+  catch (e) { toast(e.message); }
+  finally { pending = false; render(); }
+}
+const STEP_SHORT = s => STAGES[stageOf(s)]?.[0] || (s === "FAILED" ? "Ошибка" : s);
+async function loadSessions() {
+  const list = await api("/api/sessions");
+  $("#sessions").innerHTML = list.map(s => `<option value="${s.session_id}">${esc((s.title || "Новая сессия").slice(0, 40))} — ${esc(STEP_SHORT(s.step))}</option>`).join("");
+  return list;
+}
+async function open(id) {
+  sid = id;
+  try { localStorage.setItem("factory.sid", id); } catch {}
+  state = await api(`/api/sessions/${sid}`);
+  lastStageIdx = -1; render(); renderEvents(); connect();
+  $("#sessions").value = id;
+}
+
+const ta = $("#text");
+ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`; });
+ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#compose").requestSubmit(); } });
+$("#compose").onsubmit = e => { e.preventDefault(); const t = ta.value; if (!t.trim()) return; ta.value = ""; ta.style.height = "auto"; send(t); };
+$("#newSession").onclick = async () => {
+  try { const s = await api("/api/sessions", { method: "POST", body: JSON.stringify({ mode: state?.settings.mode || "auto" }) }); await loadSessions(); open(s.session_id); }
+  catch (e) { toast(e.message); }
+};
+$("#sessions").onchange = e => open(e.target.value);
+document.querySelectorAll("#modeSeg button").forEach(b => b.onclick = async () => {
+  if (!sid || b.dataset.mode === state.settings.mode) return;
+  try { state = await api(`/api/sessions/${sid}/settings`, { method: "POST", body: JSON.stringify({ mode: b.dataset.mode }) }); render(); }
+  catch (e) { toast(e.message); }
+});
+new ResizeObserver(() => state && renderTraining()).observe($("#side"));
+
+(async () => {
+  try {
+    const list = await loadSessions();
+    let id = null;
+    try { id = localStorage.getItem("factory.sid"); } catch {}
+    if (!list.find(s => s.session_id === id)) id = list[0]?.session_id;
+    if (!id) { const s = await api("/api/sessions", { method: "POST", body: JSON.stringify({ mode: "auto" }) }); await loadSessions(); id = s.session_id; }
+    await open(id);
+    loadHardware();
+  } catch (e) { toast(`Не удалось загрузить сессии: ${e.message}`); }
+})();
+</script>
+</body>
+</html>

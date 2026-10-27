@@ -13,3 +13,9 @@ wheels/
 qwen3_lora
 potential_datasets
 lid.176.bin
+# рабочее состояние агентной системы (DATA_DIR)
+data/sessions/
+data/runs/
+data/cache/
+data/mlruns/
+data/locks/

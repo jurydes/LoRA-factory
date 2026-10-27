@@ -1,0 +1,81 @@
+# Реестр типов задач. Метрики не выбирает ни пользователь, ни LLM: они заданы здесь.
+# Все метрики — «больше = лучше». format — вид ответа модели:
+#   label    — одна метка из набора (классификация);
+#   text     — свободный текст в одну строку;
+#   entities — список сущностей «ТИП: текст; ТИП: текст» или «нет»;
+#   span     — короткий фрагмент контекста (экстрактивный QA).
+# evaluation — описание процедуры оценки (показывается агентам).
+text_classification:
+  title: Text Classification
+  family: classification
+  format: label
+  supported: true
+  metrics: [macro_f1, accuracy, weighted_f1]
+  primary_metric: macro_f1
+  evaluation: >-
+    Модель генерирует название метки; ответ нормализуется (регистр, пробелы, пунктуация) и сопоставляется с набором
+    меток. Ответ вне набора — нераспарсенный и считается ошибкой. Основная метрика — macro-F1: устойчива к дисбалансу
+    классов; accuracy и weighted-F1 — для полноты картины; дополнительно precision/recall/F1 по каждому классу.
+  baselines: [majority, base_prompt]
+
+sentiment_analysis:
+  title: Sentiment Analysis
+  family: classification
+  format: label
+  supported: true
+  metrics: [macro_f1, accuracy, weighted_f1]
+  primary_metric: macro_f1
+  evaluation: >-
+    Как классификация: метка тональности сопоставляется с набором. Основная — macro-F1 (нейтральный и редкие классы
+    весят наравне с частыми), accuracy и weighted-F1 — дополнительно; per-class отчёт.
+  baselines: [majority, base_prompt]
+
+summarization:
+  title: Summarization
+  family: generation
+  format: text
+  supported: true
+  metrics: [rougeL, rouge1, rouge2, chrf, bert_score_f1]
+  primary_metric: rougeL
+  evaluation: >-
+    Модель генерирует резюме по входному тексту. ROUGE-1/2/L F1 по словам (с токенизацией, сохраняющей кириллицу) —
+    стандарт оценки суммаризации; chrF устойчив к морфологии русского; BERTScore F1 (bert-base-multilingual-cased)
+    оценивает смысловую близость. Основная — ROUGE-L.
+  baselines: [lead, base_prompt]
+
+text_generation:
+  title: Text Generation (перефразирование, детоксификация, упрощение, ответы)
+  family: generation
+  format: text
+  supported: true
+  metrics: [chrf, bleu, bert_score_f1, exact_match]
+  primary_metric: chrf
+  evaluation: >-
+    Модель генерирует ответ по входу. chrF (основная) — символьные n-граммы, устойчивы к морфологии; BLEU — словесные
+    n-граммы; BERTScore F1 — смысловая близость; ExactMatch — доля точных совпадений после нормализации.
+  baselines: [copy_input, base_prompt]
+
+ner:
+  title: Named Entity Recognition
+  family: generation
+  format: entities
+  supported: true
+  metrics: [entity_f1, entity_precision, entity_recall]
+  primary_metric: entity_f1
+  evaluation: >-
+    Генеративный NER: модель выдаёт сущности строкой «ТИП: текст; ТИП: текст» (или «нет»). Сущность засчитывается
+    при точном совпадении типа и нормализованного текста (entity-level, как seqeval/CoNLL). Micro-precision,
+    micro-recall и F1 по всем сущностям выборки; основная — F1.
+  baselines: [gazetteer, base_prompt]
+
+qa:
+  title: Question Answering (экстрактивный)
+  family: generation
+  format: span
+  supported: true
+  metrics: [token_f1, exact_match]
+  primary_metric: token_f1
+  evaluation: >-
+    Модель отвечает коротким фрагментом контекста. Метрики SQuAD: ExactMatch и token-F1 после нормализации
+    (регистр, пунктуация, пробелы); при нескольких эталонных ответах берётся лучший. Основная — token-F1.
+  baselines: [best_sentence, base_prompt]

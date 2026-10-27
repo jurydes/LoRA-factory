@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRA factory — запуски</title>
+<style>
+  :root { color-scheme: light; --page: #f6f6f3; --surface: #fcfcfb; --ink: #1a1a18; --ink-2: #52514e; --ink-3: #7c7a74;
+    --line: #e1e0d9; --accent-ink: #1c5cab; --good: #0f7a0f; --bad: #b42f2f; }
+  @media (prefers-color-scheme: dark) { :root { color-scheme: dark; --page: #111110; --surface: #1a1a19; --ink: #f0efec;
+    --ink-2: #c3c2b7; --ink-3: #8f8d86; --line: #2c2c2a; --accent-ink: #8db8f0; --good: #3fbf3f; --bad: #ef7a7a; } }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--page); color: var(--ink); }
+  header { display: flex; gap: 16px; align-items: baseline; padding: 12px clamp(16px, 4vw, 40px); border-bottom: 1px solid var(--line); background: var(--surface); }
+  h1 { font-size: 15px; margin: 0; } a { color: var(--accent-ink); }
+  main { padding: 16px clamp(16px, 4vw, 40px); }
+  .tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--ink-3); font-weight: 500; white-space: nowrap; } td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .muted { color: var(--ink-3); } .good { color: var(--good); } .bad { color: var(--bad); }
+  code { font: 12px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<header><h1>Запуски и адаптеры</h1><a href="/">← к чату</a></header>
+<main><div class="tbl"><table><thead><tr>
+  <th>Запуск</th><th>Задача</th><th>Модель / бэкенд</th><th>Датасет</th><th>Статус</th>
+  <th class="num">Метрика val</th><th class="num">test</th><th class="num">Лучший baseline</th><th class="num">Задержка</th><th>Адаптер</th>
+</tr></thead><tbody id="rows"><tr><td colspan="10" class="muted">Загрузка…</td></tr></tbody></table></div></main>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = v => v == null ? "—" : (+v).toFixed(3);
+const BASELINE = { majority: "самый частый класс", base_prompt: "исходная модель", lead: "первые предложения",
+  copy_input: "копия входа", gazetteer: "словарь сущностей", best_sentence: "лучшее предложение" };
+const STATUS = { finished: "готов", running: "обучается", round_review: "итоги раунда", pilot: "пилот", created: "создан", failed: "ошибка", interrupted: "прерван" };
+fetch("/api/runs").then(r => r.json()).then(runs => {
+  const rows = document.getElementById("rows");
+  if (!runs.length) { rows.innerHTML = `<tr><td colspan="10" class="muted">Запусков пока нет.</td></tr>`; return; }
+  rows.innerHTML = runs.map(r => {
+    const pm = r.primary_metric, best = Object.entries(r.baselines_test || {}).filter(([, m]) => m[pm] != null)
+      .reduce((a, b) => (!a || b[1][pm] > a[1][pm]) ? b : a, null);
+    const test = r.test?.[pm], delta = best && test != null ? test - best[1][pm] : null;
+    return `<tr><td><code>${esc(r.run_id)}</code>${r.restart_of ? `<div class="muted">перезапуск ${esc(r.restart_of)}</div>` : ""}</td>
+      <td>${esc(r.task_type)}<div class="muted">${esc((r.description || "").slice(0, 80))}</div></td>
+      <td>${esc(r.base_model)}<div class="muted">${esc(r.backend)}${r.quantization === "4bit" ? ", 4 бита" : ""}, раундов ${r.rounds}</div></td>
+      <td>${esc(r.dataset)}</td><td>${esc(STATUS[r.status] || r.status)}</td>
+      <td class="num">${num(r.val?.[pm])}<div class="muted">${esc(pm)}</div></td>
+      <td class="num">${num(test)}${delta != null ? `<div class="${delta >= 0 ? "good" : "bad"}">${delta >= 0 ? "+" : "−"}${num(Math.abs(delta))}</div>` : ""}</td>
+      <td class="num">${best ? `${num(best[1][pm])}<div class="muted">${esc(BASELINE[best[0]] || best[0])}</div>` : "—"}</td>
+      <td class="num">${r.latency_ms ? `${Math.round(r.latency_ms)} мс` : "—"}</td>
+      <td>${r.adapter_path ? `<code>${esc(r.adapter_path)}</code>` : "—"}</td></tr>`;
+  }).join("");
+});
+</script>
+</body>
+</html>

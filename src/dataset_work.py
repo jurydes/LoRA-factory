@@ -3,6 +3,15 @@ import numpy as np
 from pathlib import Path
 from datasets import load_dataset, DatasetDict, concatenate_datasets
 from generation import generate_task, AsyncList
+
+# fasttext uses np.array(..., copy=False) which breaks on NumPy 2.x
+_orig_np_array = np.array
+def _np_array_compat(obj, *args, copy=None, **kwargs):
+    if copy is False:
+        return np.asarray(obj, *args, **kwargs)
+    return _orig_np_array(obj, *args, **kwargs) if copy is None else _orig_np_array(obj, *args, copy=copy, **kwargs)
+np.array = _np_array_compat
+
 import fasttext
 from huggingface_hub import HfApi, hf_hub_download
 
@@ -64,6 +73,24 @@ def search_datasets(config) -> list[dict]:
                 "score": 0,
             }
     return list(seen.values())
+
+
+EXPAND_QUERY_PROMPT = """Ты — эксперт по обработке естественного языка (NLP). Твоя задача — превращать краткие, неформальные описания задач от пользователя в развернутые, профессиональные формулировки для поиска датасетов или постановки технического задания. Не нужно описывать архитектуры моделей, которые мы дообучаем. Важно упомянуть наличие русского языка в датасете.
+
+Твой ответ должен состоять ровно из трех предложений и СТРОГО следовать следующему шаблону (начинай предложения именно с этих слов): 
+
+1. Я решаю задачу [детальное, профессиональное описание сути задачи и процесса].
+2. Датасеты должны [конкретные требования к формату данных, разметке, составу и архитектуре датасета].
+3. Важно/важна [ключевые критерии качества, ограничения, метрики и важные нюансы решения].
+
+Запрос пользователя: {query}
+
+Ответь только тремя предложениями по шаблону, без лишнего текста."""
+
+
+async def expand_query(query: str) -> str:
+    """Расширяет краткое описание задачи в профессиональную формулировку через LLM."""
+    return await generate_task(EXPAND_QUERY_PROMPT.format(query=query), temperature=0.3, max_tokens=300)
 
 
 SCORING_PROMPT = """
@@ -173,7 +200,7 @@ def create_dataset(config, tokenizer, datasets_info: list[tuple[str, str, str]])
     all_raw_test = []
 
     for dataset_name, input_col, target_col in datasets_info:
-        dataset = load_dataset(dataset_name, trust_remote_code=True)
+        dataset = load_dataset(dataset_name)
 
         if "validation" in dataset:
             split = {"train": dataset["train"], "test": dataset["validation"]}

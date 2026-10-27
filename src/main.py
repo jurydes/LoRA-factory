@@ -4,7 +4,7 @@ import traceback
 import asyncio
 from settings import TrainConfig, HYPERPARAMETER_PRESETS
 from load_model import load_model
-from dataset_work import create_dataset, check_available_datasets, detect_columns
+from dataset_work import create_dataset, check_available_datasets, detect_columns, expand_query
 from train import train_and_log
 from inference import val_check, compute_metrics
 from datasets import load_dataset as hf_load_dataset
@@ -48,7 +48,12 @@ def choose_hyperparameters(config: TrainConfig) -> TrainConfig:
     return config
 
 
-def _training_worker(config: TrainConfig, datasets_info: list[tuple[str, str, str]]):
+def _training_worker(
+    config: TrainConfig,
+    datasets_info: list[tuple[str, str, str]],
+    suggestion_queue: "multiprocessing.Queue",
+    choice_queue: "multiprocessing.Queue",
+):
     import os
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
@@ -61,28 +66,23 @@ def _training_worker(config: TrainConfig, datasets_info: list[tuple[str, str, st
 
         suggested, reasons = suggest_config(config, len(raw["train"]), metrics_before["bert_score_f1"])
 
-        print("\nПредложенная конфигурация на основе эвристик:")
-        for reason in reasons:
-            print(f"  • {reason}")
-        print(f"\n  epochs={suggested.num_train_epochs}, lr={suggested.learning_rate}", end="")
-        if config.adapter_type == "lora":
-            print(f", lora_r={suggested.lora_r}, lora_alpha={suggested.lora_alpha}")
-        else:
-            print()
-        print("\n[1] Использовать предложенную конфигурацию (по умолчанию)")
-        print("[2] Ввести параметры вручную")
-        if input("Ваш выбор [1-2]: ").strip() == "2":
-            config = choose_hyperparameters(config)
-        else:
-            config = suggested
-            print("Используется предложенная конфигурация.")
+        # Отправляем предложение в главный процесс и ждём выбора пользователя
+        suggestion_queue.put({
+            "suggested": suggested,
+            "reasons": reasons,
+            "adapter_type": config.adapter_type,
+        })
+        chosen_config = choice_queue.get()
+        config = chosen_config
 
         trained = train_and_log(tokenizer, model, dataset, config)
         metrics_after = compute_metrics(tokenizer, trained, raw["test"], config, label="ПОСЛЕ обучения")
 
         logger.info(
-            "Сравнение: ExactMatch %.4f → %.4f, BERTScore F1 %.4f → %.4f",
+            "Сравнение: ExactMatch %.4f → %.4f, BLEU %.2f → %.2f, chrF %.4f → %.4f, BERTScore F1 %.4f → %.4f",
             metrics_before["exact_match"], metrics_after["exact_match"],
+            metrics_before["bleu"], metrics_after["bleu"],
+            metrics_before["chrf"], metrics_after["chrf"],
             metrics_before["bert_score_f1"], metrics_after["bert_score_f1"],
         )
 
@@ -100,8 +100,38 @@ def run_lora_pipeline(config: TrainConfig, datasets_info: list[tuple[str, str, s
     Возвращает строку с результатом или бросает RuntimeError при аварийном завершении.
     """
     ctx = multiprocessing.get_context('spawn')
-    process = ctx.Process(target=_training_worker, args=(config, datasets_info))
+    suggestion_queue = ctx.Queue()
+    choice_queue = ctx.Queue()
+
+    process = ctx.Process(
+        target=_training_worker,
+        args=(config, datasets_info, suggestion_queue, choice_queue),
+    )
     process.start()
+
+    # Ждём предложения от воркера, спрашиваем пользователя, отправляем выбор обратно
+    data = suggestion_queue.get()
+    suggested: TrainConfig = data["suggested"]
+    reasons: list[str] = data["reasons"]
+    adapter_type: str = data["adapter_type"]
+
+    print("\nПредложенная конфигурация на основе эвристик:")
+    for reason in reasons:
+        print(f"  • {reason}")
+    print(f"\n  epochs={suggested.num_train_epochs}, lr={suggested.learning_rate}", end="")
+    if adapter_type == "lora":
+        print(f", lora_r={suggested.lora_r}, lora_alpha={suggested.lora_alpha}")
+    else:
+        print()
+    print("\n[1] Использовать предложенную конфигурацию (по умолчанию)")
+    print("[2] Ввести параметры вручную")
+    if input("Ваш выбор [1-2]: ").strip() == "2":
+        chosen = choose_hyperparameters(config)
+    else:
+        chosen = suggested
+        print("Используется предложенная конфигурация.")
+    choice_queue.put(chosen)
+
     process.join()
 
     if process.exitcode == 0:
@@ -148,11 +178,22 @@ async def main():
 
     task_description = input("Опишите задачу, которую вы решаете: ").strip()
 
+    print("\nРасширяем описание задачи...")
+    task_description = await expand_query(task_description)
+    print(f"\nРасширенное описание:\n{task_description}")
+
     available_datasets = await check_available_datasets(task_description, config)
     if available_datasets:
         print("\nВведите id датасетов для обучения через запятую (можно несколько):")
         chosen_raw = input("dataset id(s): ").strip()
-        dataset_ids = [d.strip() for d in chosen_raw.split(",") if d.strip()]
+        dataset_ids = []
+        for d in chosen_raw.split(","):
+            d = d.strip()
+            if not d:
+                continue
+            if d.startswith("https://huggingface.co/datasets/"):
+                d = d.removeprefix("https://huggingface.co/datasets/")
+            dataset_ids.append(d)
     else:
         dataset_ids = [config.dataset_name]
 
@@ -173,7 +214,7 @@ async def main():
 
             except (RuntimeError, ValueError) as e:
                 print(f"\n{e}")
-                dataset_id = input("Введите id другого датасета: ").strip()
+                dataset_id = input("Введите id другого датасета: ").strip().removeprefix("https://huggingface.co/datasets/")
 
     model_slug = config.model_name.split("/")[-1]
     dataset_slug = "+".join(ds_id.split("/")[-1] for ds_id, _, _ in datasets_info)

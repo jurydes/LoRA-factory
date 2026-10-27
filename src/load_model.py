@@ -22,9 +22,16 @@ def load_model(config: TrainConfig):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    try:
+        import flash_attn  # noqa: F401
+        attn_impl = "flash_attention_2"
+    except Exception:
+        attn_impl = "sdpa"
+        logger.warning("flash_attn недоступен, используется sdpa")
+
     model = AutoModelForCausalLM.from_pretrained(
         config.model_name,
-        attn_implementation="flash_attention_2",
+        attn_implementation=attn_impl,
         dtype=torch.bfloat16 if config.bf16 else "auto",
         device_map={"": config.device}
     )

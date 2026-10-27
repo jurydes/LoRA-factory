@@ -13,6 +13,8 @@ class OpenAISettings(BaseModel):
     url: Union[str, HttpUrl] = Field(default=HttpUrl("http://localhost"))
     key: str = Field(default="EMPTY")
     default_model: str = Field(default="RefalMachine/RuadaptQwen3-32B-Instruct-v2")
+    # сетевой интерфейс (имя, например Ethernet, или IP), через который ходить к серверу — мимо VPN в режиме TUN
+    bind_interface: str | None = Field(default=None)
 
 
 class ModuleSettings(BaseSettings):
