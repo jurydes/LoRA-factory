@@ -79,6 +79,25 @@ def test_intake_present_only_found(registry, cls_spec):
     assert out.hf_ids == ["org/reviews"]
 
 
+def test_search_before_reconfirming_spec_does_not_exhaust_retries(registry, cls_spec):
+    from factory.agents import intake
+
+    async def unexpected_search(spec, extra):
+        raise AssertionError("unconfirmed spec must not start a dataset search")
+
+    deps = intake.IntakeDeps(registry=registry,
+                             spec=cls_spec.model_copy(update={"confirmed_by_user": False}),
+                             search=unexpected_search)
+    revised = {"description": "Классификация англоязычных отзывов", "task_type": "sentiment_analysis",
+               "language": "en", "labels": ["positive", "negative"], "base_model_id": "Qwen/Qwen3-0.6B"}
+    model = scripted(*(lambda m, i: tool("search_datasets") for _ in range(4)),
+                     lambda m, i: final(i, "ProposeSpec", spec=revised))
+    with llm.override_model(model):
+        out, _ = run(intake.run_turn(deps, "Ослабить ограничения: можно английский язык"))
+    assert isinstance(out, intake.ProposeSpec)
+    assert deps.finalized_spec.language == "en"
+
+
 def test_conversation_roundtrip(registry):
     from pydantic_ai import ConversationTypeAdapter
 

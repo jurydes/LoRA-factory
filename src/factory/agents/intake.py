@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelRetry, RunContext, UsageLimits
+from pydantic_ai import Agent, ModelRetry, RunContext, ToolFailed, UsageLimits
 
 from factory.core import llm
 from factory.core.contracts import Constraints, DatasetCandidate, TaskSpec
@@ -74,6 +74,12 @@ agent = Agent(deps_type=IntakeDeps, output_type=[AskUser, ProposeSpec, PresentDa
 def _state(ctx: RunContext[IntakeDeps]) -> str:
     if ctx.deps.spec and ctx.deps.spec.confirmed_by_user:
         return f"Подтверждённая постановка: {ctx.deps.spec.model_dump_json(exclude={'metrics'})}"
+    if ctx.deps.spec:
+        return (f"Предыдущая постановка (подтверждение снято): "
+                f"{ctx.deps.spec.model_dump_json(exclude={'metrics'})}. "
+                "Сейчас пользователь уточняет или меняет задачу после неудачного поиска. "
+                "Обнови язык, описание и ограничения по его ответу, при необходимости вызови list_models, "
+                "затем ответь ProposeSpec. До подтверждения новой постановки search_datasets вызывать нельзя.")
     return "Постановка ещё не подтверждена."
 
 
@@ -107,9 +113,12 @@ def list_models(ctx: RunContext[IntakeDeps], language: str = "ru", max_params_b:
 async def search_datasets(ctx: RunContext[IntakeDeps], extra_query: str | None = None) -> list[dict]:
     """Поиск датасетов под подтверждённую постановку. extra_query — уточнение формулировки поиска."""
     deps = ctx.deps
-    if not deps.spec or not deps.spec.confirmed_by_user or deps.search is None:
-        raise ModelRetry("Поиск доступен только после подтверждения постановки: сначала ответь ProposeSpec "
-                         "и дождись подтверждения пользователя, поиск не повторяй")
+    if not deps.spec or not deps.spec.confirmed_by_user:
+        raise ToolFailed("Поиск сейчас закрыт: новая постановка ещё не подтверждена. "
+                         "Измени её по последнему ответу пользователя, предложи ProposeSpec и дождись подтверждения. "
+                         "Повторять search_datasets на этом ходе бессмысленно.")
+    if deps.search is None:
+        raise ToolFailed("Поиск датасетов сейчас недоступен. Сообщи об этом пользователю.")
     found = await deps.search(deps.spec, extra_query)
     known = {c.hf_id for c in deps.candidates}
     deps.candidates += [c for c in found if c.hf_id not in known]
