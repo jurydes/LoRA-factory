@@ -12,6 +12,8 @@ services:
       OPENAI_SERVER__URL: ${OPENAI_SERVER__URL:-http://host.docker.internal:8001/v1}
       OPENAI_SERVER__DEFAULT_MODEL: ${OPENAI_SERVER__DEFAULT_MODEL:-local}
       OPENAI_SERVER__KEY: ${OPENAI_SERVER__KEY:-EMPTY}
+      # A host interface such as "Ethernet" does not exist inside the container.
+      OPENAI_SERVER__BIND_INTERFACE: ""
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

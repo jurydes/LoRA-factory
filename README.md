@@ -41,7 +41,26 @@ docker compose exec factory python -m factory register-model --path /models/my-m
 интерфейс. Для агентов нужен OpenAI-совместимый LLM-сервер внутри вашей сети; укажите его адрес
 через `OPENAI_SERVER__URL`, а имя модели — через `OPENAI_SERVER__DEFAULT_MODEL`.
 `host.docker.internal:8001/v1` — значение по умолчанию для сервера на машине Docker. LLM-сервер
-должен быть доступен из контейнера. Если для задачи требуется BERTScore, укажите в `data/config.yaml`
+должен быть доступен из контейнера.
+`src/dev.env` используется только при запуске без Docker и не копируется в образ. Для Docker
+передайте `OPENAI_SERVER__URL`, `OPENAI_SERVER__KEY` и `OPENAI_SERVER__DEFAULT_MODEL` через
+переменные окружения Compose или файл `.env` в корне проекта. Привязка к Windows-интерфейсу
+`OPENAI_SERVER__BIND_INTERFACE` внутри контейнера отключена.
+
+Если удалённый LLM-сервер доступен с Windows только через конкретный адаптер (например, из-за
+VPN), запустите на Windows мост:
+
+```powershell
+.venv\Scripts\python.exe scripts\llm_bridge.py
+```
+
+Мост читает адрес, ключ и адаптер из `src/dev.env`, слушает только `127.0.0.1:8001` и принимает
+запросы с тем же ключом. В корневом `.env` для Compose задайте
+`OPENAI_SERVER__KEY` и `OPENAI_SERVER__DEFAULT_MODEL` из `src/dev.env`, а `OPENAI_SERVER__URL`
+не задавайте: Docker использует `http://host.docker.internal:8001/v1`. Мост должен работать,
+пока нужны вызовы агентов. Для LLM-сервера, доступного контейнеру напрямую, мост не требуется.
+
+Если для задачи требуется BERTScore, укажите в `data/config.yaml`
 локальный каталог модели как
 `training.bert_score_model`:
 

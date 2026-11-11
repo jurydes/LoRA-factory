@@ -7,6 +7,8 @@
 __pycache__
 *.pyc
 *.env
+**/*.env
+src/dev.env
 data/*
 !data/registry/
 !data/registry/**

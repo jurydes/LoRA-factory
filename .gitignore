@@ -20,4 +20,5 @@ data/cache/
 data/mlruns/
 data/locks/
 data/model_source.json
+data/llm_bridge*.log
 models/
