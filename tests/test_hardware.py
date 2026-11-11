@@ -52,6 +52,17 @@ def test_recommendation_prefers_best_quality_within_budget_and_language(registry
     assert tight["params_b"] < rec[0]["params_b"]  # маленький бюджет времени — модель меньше
 
 
+def test_auto_recommends_lora_before_higher_quality_qlora(registry):
+    small = registry.models["Qwen/Qwen3-0.6B"].model_copy(update={"quality": 40.0})
+    quantized = registry.models["Qwen/Qwen2.5-7B-Instruct"].model_copy(update={"quality": 100.0})
+    rows = rank_models([small, quantized], hw(8), language="ru")
+    assert next(r for r in rows if r["recommended"])["id"] == small.id
+    explicit_qlora = rank_models([small, quantized], hw(8), language="ru", prefer_lora=False)
+    assert next(r for r in explicit_qlora if r["recommended"])["id"] == quantized.id
+    fallback = rank_models([quantized], hw(8), language="ru")
+    assert fallback[0]["recommended"] and fallback[0]["mode"] == "qlora"
+
+
 def test_recommendation_prefers_newer_generation_over_size(registry):
     """Новое поколение меньшего размера сильнее старого: Qwen3.5-2B (MMLU-Pro 55) лучше Qwen3-1.7B (40)."""
     models = [registry.models[i] for i in ("Qwen/Qwen3-1.7B", "Qwen/Qwen3.5-0.8B", "Qwen/Qwen3.5-2B")]

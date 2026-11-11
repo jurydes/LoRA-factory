@@ -146,11 +146,11 @@ def assess_model(model: ModelInfo, hw, safety: float = 0.85, budget_hours: float
 
 
 def rank_models(models: list[ModelInfo], hw, safety: float = 0.85, budget_hours: float | None = None,
-                language: str | None = None) -> list[dict]:
-    """Оценка всех моделей + рекомендация: лучшая по качеству (quality) из помещающихся в память этой GPU —
-    в LoRA bf16 или в QLoRA (квантование при загрузке либо готовый 4-битный чекпоинт). Память считается честно:
-    с KV-кэшем генерации на оценке (estimate_memory) и без VRAM, занятой другими программами. При равном качестве —
-    LoRA bf16 (точнее и быстрее), затем меньший объём скачивания (готовая 4-битная копия). Размер сам по себе не
+                language: str | None = None, prefer_lora: bool = True) -> list[dict]:
+    """Оценка всех моделей + рекомендация: лучшая LoRA-модель, помещающаяся в память этой GPU.
+    QLoRA рекомендуется, только если LoRA-модели не подходят или явно выбран метод QLoRA. Память считается честно:
+    с KV-кэшем генерации на оценке (estimate_memory) и без VRAM, занятой другими программами. Среди моделей
+    выбранного режима предпочтительнее качество, затем меньший объём скачивания. Размер сам по себе не
     довод: новое поколение того же размера заметно сильнее старого. Время ограничивает выбор, только если
     пользователь задал бюджет GPU-часов. Явная поддержка языка задачи — бонус NATIVE_BONUS к качеству, а не фильтр:
     у многих сильных моделей карточка не перечисляет языки вовсе. Ничего не помещается — самая лёгкая."""
@@ -161,7 +161,8 @@ def rank_models(models: list[ModelInfo], hw, safety: float = 0.85, budget_hours:
     in_time = lambda r: not budget_hours or r["hours_typical"] is None or r["hours_typical"] <= budget_hours  # noqa: E731
     pool = [r for r in rows if r["fits"] and in_time(r)]
     if pool:
-        max(pool, key=lambda r: (r["quality"] + NATIVE_BONUS * r["native_language"], r["mode"] == "lora",
+        preferred = [r for r in pool if r["mode"] == "lora"] if prefer_lora else []
+        max(preferred or pool, key=lambda r: (r["quality"] + NATIVE_BONUS * r["native_language"], r["mode"] == "lora",
                                  -r["download_gb"], r["params_b"]))["recommended"] = True
     else:
         fitting = [r for r in rows if r["fits"]]

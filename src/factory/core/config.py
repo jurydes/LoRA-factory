@@ -45,7 +45,8 @@ class SearchConfig(BaseModel):
     catalog_limit: int = 3000
     min_lang_examples: int = 100
     llm_examples: int = 5
-    compat_timeout_s: float = 240.0  # на проверку совместимости всех кандидатов; не успевшие пропускаются
+    compat_timeout_s: float = 120.0  # общий лимит проверки кандидатов HF; не успевшие пропускаются
+    assess_timeout_s: float = 90.0  # общий лимит LLM-оценки финалистов
     auto_choose_min_score: float = 60.0  # Авто берёт лучший датасет сам, только если его оценка не ниже (из 100)
     # ⚠️ веса критериев LLM-оценки (сумма = 1)
     criteria_weights: dict[str, float] = Field(default_factory=lambda: {

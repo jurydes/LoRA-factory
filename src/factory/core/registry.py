@@ -128,7 +128,8 @@ class Registry:
         if constraints.adapter_method == "lora":  # явный выбор LoRA — без квантизации; QLoRA-only не подходит
             rows = [r for r in rank_models(models, hw, safety, constraints.gpu_hours, language) if r["mode"] == "lora"]
         else:
-            rows = rank_models(models, hw, safety, constraints.gpu_hours, language)
+            rows = rank_models(models, hw, safety, constraints.gpu_hours, language,
+                               prefer_lora=constraints.adapter_method != "qlora")
         return [r for r in rows if r["fits"]]
 
     def apply_task_metrics(self, spec: TaskSpec) -> TaskSpec:

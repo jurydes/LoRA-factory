@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -81,38 +82,67 @@ async def search(spec: TaskSpec, registry: Registry, cfg: AppConfig | None = Non
 
     finalists: list[tuple[DatasetCandidate, object]] = []
     unmapped: list[tuple[DatasetCandidate, object]] = []  # колонки не распознаны — сопоставление предложит LLM
-    pool_size = min(len(ranked), cfg.search.top_llm * 3)
+    pool_size = min(len(ranked), cfg.search.top_llm * 2)
     loop = asyncio.get_running_loop()
     # Проверка — в отдельных процессах: выборка датасета, лежащего одним большим JSON, скачивается и разбирается
     # целиком, и разбор держит GIL — в потоках сервиса на это время замирал весь сервер (чат, SSE, API).
     # Общий лимит времени: тяжёлые кандидаты отбрасываются, а не задерживают поиск.
-    pool = ProcessPoolExecutor(max_workers=min(8, os.cpu_count() or 1))
+    # Linux fork inherits the server's threads and large ML objects. Spawn a few clean workers instead;
+    # eight parallel HF loaders exhausted Docker Desktop's memory in a real search.
+    pool = ProcessPoolExecutor(max_workers=min(3, os.cpu_count() or 1),
+                               mp_context=multiprocessing.get_context("spawn"))
+    futures: list[asyncio.Future] = []
+    checked: dict[int, tuple[DatasetCandidate | None, object | None]] = {}
+    completed_count = 0
     try:
         futures = [loop.run_in_executor(pool, _check_one, catalog.records[i], s, spec, registry, cfg)
                    for i, s in ranked[:pool_size]]
-        done, pending = await asyncio.wait(futures, timeout=cfg.search.compat_timeout_s)
+        indexes = {future: index for index, future in enumerate(futures)}
+        pending = set(futures)
+        deadline = loop.time() + cfg.search.compat_timeout_s
+        while pending and loop.time() < deadline:
+            done, pending = await asyncio.wait(pending, timeout=min(10, deadline - loop.time()),
+                                               return_when=asyncio.FIRST_COMPLETED)
+            completed_count += len(done)
+            for future in done:
+                if future.cancelled():
+                    continue
+                if error := future.exception():
+                    logger.warning("Проверка совместимости упала: %r", error)
+                    continue
+                checked[indexes[future]] = future.result()
+            compatible = sum(bool(c and c.compat and c.compat.ok) for c, _ in checked.values())
+            say(f"Проверено {completed_count}/{pool_size} датасетов; совместимых: {compatible}…")
+            if compatible >= cfg.search.top_llm:
+                break
         if pending:
             logger.info("Проверка совместимости: %d датасетов не уложились в %s с — пропущены",
                         len(pending), cfg.search.compat_timeout_s)
-            for f in pending:
-                f.cancel()
-        for f in futures:  # в порядке ранжирования
-            if f not in done:
-                continue
-            if f.exception() is not None:
-                logger.warning("Проверка совместимости упала: %r", f.exception())
-                continue
-            cand, sample = f.result()
+        for index in sorted(checked):  # результаты — в порядке ранжирования
+            cand, sample = checked[index]
             if cand is not None and cand.compat and cand.compat.ok and len(finalists) < cfg.search.top_llm:
                 finalists.append((cand, sample))
             elif cand is not None and cand.compat and cand.compat.needs_mapping:
                 unmapped.append((cand, sample))
     finally:
+        for future in futures:
+            if not future.done():
+                future.cancel()
         processes = list((pool._processes or {}).values())
-        pool.shutdown(wait=False, cancel_futures=True)
-        for p in processes:  # процессы, застрявшие на тяжёлом датасете
-            p.terminate()
+        for p in processes:  # сначала останавливаем зависшие загрузчики, потом освобождаем пул
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=0.5)
+                if p.is_alive():
+                    p.kill()
+        try:
+            await asyncio.wait_for(asyncio.to_thread(pool.shutdown, wait=False, cancel_futures=True), timeout=5)
+        except TimeoutError:
+            logger.warning("Освобождение пула проверки датасетов заняло более 5 с")
     unmapped = unmapped[:max(0, cfg.search.top_llm - len(finalists))]
+    if not finalists and not unmapped:
+        say("Совместимых датасетов не найдено. Можно загрузить свой файл или уточнить запрос.")
+        return []
     say(f"Совместимых финалистов: {len(finalists)}"
         + (f" (+{len(unmapped)} с нераспознанными колонками — их сопоставит LLM)" if unmapped else "")
         + ". Оцениваю их по критериям…")
@@ -125,7 +155,20 @@ async def search(spec: TaskSpec, registry: Registry, cfg: AppConfig | None = Non
             logger.warning("LLM-оценка %s не удалась: %s", cand.hf_id, e)
             return cand.model_copy(update={"why": "LLM-оценка недоступна; кандидат прошёл проверку совместимости"})
 
-    assessed = await asyncio.gather(*(_assess(c, s) for c, s in finalists + unmapped))
+    evaluation = finalists + unmapped
+    jobs = [asyncio.create_task(_assess(c, s)) for c, s in evaluation]
+    assessed = []
+    if jobs:
+        done, pending = await asyncio.wait(jobs, timeout=cfg.search.assess_timeout_s)
+        for job, (cand, _) in zip(jobs, evaluation):
+            if job in done and not job.cancelled() and job.exception() is None:
+                assessed.append(job.result())
+            else:
+                if job in pending:
+                    job.cancel()
+                assessed.append(cand.model_copy(update={"why": "LLM-оценка не уложилась в лимит времени"}))
+        if pending:
+            say(f"LLM-оценка {len(pending)} датасетов не уложилась в {cfg.search.assess_timeout_s:g} с.")
     return sorted((c for c in assessed if c.compat and c.compat.ok), key=lambda c: -c.score)
 
 

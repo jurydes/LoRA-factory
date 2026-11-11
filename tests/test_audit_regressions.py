@@ -1,5 +1,6 @@
 """Пограничные сценарии данных, загрузки и восстановления после сбоя."""
 import asyncio
+from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -67,6 +68,52 @@ def test_empty_dataset_search_returns_no_candidates(cfg, registry, cls_spec, mon
     monkeypatch.setattr(funnel, "hybrid_search", lambda *a: [(0, {})] if excluded else [])
     monkeypatch.setattr(funnel, "ProcessPoolExecutor", lambda **kw: pytest.fail("empty search needs no workers"))
     assert asyncio.run(funnel.search(cls_spec, registry, cfg, exclude={"excluded"})) == []
+
+
+def test_dataset_search_timeout_stops_workers_before_pool_shutdown(cfg, registry, cls_spec, monkeypatch):
+    from factory.search import funnel
+
+    class Catalog:
+        records = [{"id": "slow", "description": "slow"}]
+
+        def __len__(self):
+            return 1
+
+    class Process:
+        alive = True
+
+        def is_alive(self):
+            return self.alive
+
+        def terminate(self):
+            self.alive = False
+
+        def join(self, timeout):
+            pass
+
+    class Pool:
+        def __init__(self):
+            self.process = Process()
+            self._processes = {1: self.process}
+            self.closed = False
+
+        def submit(self, *args):
+            return Future()  # загрузка HF зависла и никогда не возвращает результат
+
+        def shutdown(self, wait, cancel_futures):
+            assert not self.process.is_alive()
+            self.closed = True
+
+    pool = Pool()
+    monkeypatch.setattr(funnel, "expand_query", AsyncMock(return_value="query"))
+    monkeypatch.setattr(funnel, "load_catalog", lambda *a: Catalog())
+    monkeypatch.setattr(funnel, "hybrid_search", lambda *a: [(0, {})])
+    monkeypatch.setattr(funnel, "ProcessPoolExecutor", lambda **kw: pool)
+    short = cfg.model_copy(update={"search": cfg.search.model_copy(update={"compat_timeout_s": 0.02})})
+    progress = []
+    assert asyncio.run(funnel.search(cls_spec, registry, short, progress=progress.append)) == []
+    assert pool.closed
+    assert any("Проверено" in message for message in progress)
 
 
 @pytest.mark.parametrize("step,busy", [(Step.PREP, None), (Step.INTAKE, "dialogue"), (Step.DATASET_CHOICE, "prep")])
