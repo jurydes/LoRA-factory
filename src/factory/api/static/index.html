@@ -54,6 +54,15 @@
   .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 7px; padding: 2px; background: var(--sunken); }
   .seg button { border: 0; background: transparent; padding: 4px 10px; border-radius: 5px; font-size: 13px; color: var(--ink-2); }
   .seg button[aria-pressed="true"] { background: var(--raised); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+  .model-switch { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; }
+  .model-switch input { appearance: none; width: 34px; height: 20px; border-radius: 20px; background: var(--line-strong); position: relative; cursor: pointer; margin: 0; transition: background .15s; }
+  .model-switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--raised); transition: transform .15s; }
+  .model-switch input:checked { background: var(--accent); }
+  .model-switch input:checked::after { transform: translateX(14px); }
+  .model-guide { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--sunken); font-size: 12px; }
+  .model-guide pre { margin: 8px 0; white-space: pre-wrap; font-size: 11px; }
+  .model-path-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .model-path-form input { flex: 1 1 180px; min-width: 0; }
   #conn { font-size: 12px; color: var(--bad); }
   #sessions { max-width: 240px; min-width: 0; text-overflow: ellipsis; }
   @media (max-width: 720px) {
@@ -199,6 +208,9 @@
   <ol class="steps" id="steps" aria-label="Этапы"></ol>
   <div class="header-tools">
     <span id="conn" role="status"></span>
+    <label class="model-switch" title="Источник моделей для новых задач">
+      <span>Локальные</span><input id="modelSourceToggle" type="checkbox" role="switch" aria-label="Источник моделей: локальные или Hugging Face"><span>Hugging Face</span>
+    </label>
     <div class="seg" role="group" aria-label="Режим работы" id="modeSeg">
       <button type="button" data-mode="auto" title="Система подтверждает сама; спрашивает только перед запуском обучения, массовым удалением данных и синтезом без уверенности агента, а также если датасетов не нашлось или раунд не дал нужного качества">Авто</button>
       <button type="button" data-mode="expert" title="Все решения подтверждаете вы; можно править постановку и гиперпараметры">Эксперт</button>
@@ -223,6 +235,7 @@
     </form>
   </section>
   <aside id="side" aria-label="Сводка и обучение">
+    <section class="side-sec"><h2>Модели</h2><div id="modelPanel"></div></section>
     <section class="side-sec"><h2>Сводка</h2><div id="summary"></div></section>
     <section class="side-sec" id="trainSec">
       <h2>Обучение</h2>
@@ -281,6 +294,7 @@ const STAGES = [
 const stageOf = step => STAGES.findIndex(([, steps]) => steps.includes(step));
 
 let sid = null, state = null, es = null, metrics = [], events = [];
+let modelSource = "local", modelPathDraft = "/models/my-model", localModels = [], modelStatus = "";
 let pending = false;                 // идёт запрос — кнопки действий заблокированы
 const cardErrors = {};               // ошибка действия у конкретной карточки
 const drafts = {};                   // несохранённые правки полей карточек: переживают перерисовку
@@ -304,6 +318,51 @@ async function api(path, opts = {}) {
     throw new Error(typeof d === "string" ? d : JSON.stringify(d));
   }
   return r.json();
+}
+
+function renderModelPanel() {
+  $("#modelSourceToggle").checked = modelSource === "hf";
+  const panel = $("#modelPanel");
+  if (modelSource === "hf") {
+    panel.innerHTML = '<p class="small muted">Модели и датасеты Hugging Face доступны для новых задач. Каталог моделей обновляется в фоне; для скачивания нужен доступ к HF.</p>';
+    return;
+  }
+  panel.innerHTML = `<p class="small muted">Hugging Face отключён. Загрузите свой датасет в задачу. Зарегистрированные локальные модели: ${localModels.length}.</p>
+    <div class="model-guide"><b>Как подготовить модель</b>
+      <ol><li>В папке проекта создайте <code>models/my-model/</code>.</li>
+      <li>Скопируйте туда <b>всю</b> папку готовой модели Transformers: конфигурацию, веса и токенизатор.</li>
+      <li>В поле ниже укажите путь <b>внутри контейнера</b>: <code>/models/my-model</code>. Путь Windows вида <code>C:\\...\\models</code> здесь не подойдёт.</li></ol>
+      <pre>models/
+  my-model/
+    config.json
+    model.safetensors  (или pytorch_model.bin)
+    tokenizer.json    (или tokenizer.model)
+    tokenizer_config.json</pre>
+      <span class="muted">Если веса разбиты на части, скопируйте все части и индексный файл. Имя папки может быть другим.</span>
+    </div>
+    <label class="small" for="modelPath">Путь к модели в контейнере</label>
+    <div class="model-path-form"><input id="modelPath" type="text" spellcheck="false" value="${esc(modelPathDraft)}" placeholder="/models/my-model"><button id="registerModel" type="button">Подключить модель</button></div>
+    <p id="modelStatus" class="small muted" role="status">${esc(modelStatus)}</p>
+    <div class="small">${localModels.length ? localModels.map(m => `<div><code>${esc(m.id)}</code></div>`).join("") : "После подключения модель появится здесь и в новых задачах."}</div>`;
+  $("#modelPath").oninput = e => { modelPathDraft = e.target.value; };
+  $("#registerModel").onclick = async () => {
+    const path = modelPathDraft.trim();
+    if (!path) { toast("Укажите путь к папке модели внутри контейнера"); return; }
+    try {
+      const model = await api("/api/models/local", { method: "POST", body: JSON.stringify({ path, languages: ["multi"] }) });
+      localModels = await api("/api/models/local");
+      modelStatus = `Подключена модель ${model.id}. Для выбора в постановке создайте новую сессию.`;
+      renderModelPanel();
+      loadHardware();
+    } catch (e) { toast(`Модель не подключена: ${e.message}`); }
+  };
+}
+
+async function loadModelSource() {
+  const info = await api("/api/model-source");
+  modelSource = info.source;
+  localModels = await api("/api/models/local");
+  renderModelPanel();
 }
 async function act(card, action, payload) {
   if (pending) return;
@@ -1099,6 +1158,23 @@ $("#newSession").onclick = async () => {
   catch (e) { toast(e.message); }
 };
 $("#sessions").onchange = e => open(e.target.value);
+$("#modelSourceToggle").onchange = async e => {
+  const source = e.target.checked ? "hf" : "local";
+  e.target.disabled = true;
+  try {
+    await api("/api/model-source", { method: "PUT", body: JSON.stringify({ source }) });
+    modelSource = source;
+    modelStatus = "";
+    await loadModelSource();
+    const s = await api("/api/sessions", { method: "POST", body: JSON.stringify({ mode: state?.settings.mode || "auto" }) });
+    await loadSessions();
+    await open(s.session_id);
+    loadHardware();
+  } catch (err) {
+    e.target.checked = modelSource === "hf";
+    toast(`Не удалось переключить источник моделей: ${err.message}`);
+  } finally { e.target.disabled = false; }
+};
 document.querySelectorAll("#modeSeg button").forEach(b => b.onclick = async () => {
   if (!sid || b.dataset.mode === state.settings.mode) return;
   try { state = await api(`/api/sessions/${sid}/settings`, { method: "POST", body: JSON.stringify({ mode: b.dataset.mode }) }); render(); }
@@ -1108,6 +1184,7 @@ new ResizeObserver(() => state && renderTraining()).observe($("#side"));
 
 (async () => {
   try {
+    await loadModelSource();
     const list = await loadSessions();
     let id = null;
     try { id = localStorage.getItem("factory.sid"); } catch {}

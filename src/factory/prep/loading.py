@@ -100,6 +100,9 @@ def pick_config(names: list[str], language: str | None) -> str | None:
 
 
 def resolve_config(hf_id: str, revision: str | None, language: str | None) -> str | None:
+    from factory.core.config import get_config
+    if get_config().offline:
+        raise RuntimeError("Загрузка датасетов с Hugging Face отключена в закрытом контуре")
     from datasets import get_dataset_config_names
     try:
         names = get_dataset_config_names(hf_id, revision=revision)
@@ -118,6 +121,9 @@ def hf_sample(hf_id: str, n: int, revision: str | None = None, config_name: str 
     Строки перемешиваются через буфер: у отсортированных датасетов первые строки — один класс. Небольшой сплит
     (размер известен из split_sizes) перемешивается целиком — иначе первые тысячи строк одного класса дают
     «колонку меток с одним значением»."""
+    from factory.core.config import get_config
+    if get_config().offline:
+        raise RuntimeError("Загрузка датасетов с Hugging Face отключена в закрытом контуре")
     from datasets import load_dataset
 
     if config_name is None:  # у многоязычных датасетов конфигурация по умолчанию — часто другой язык
@@ -139,6 +145,9 @@ def hf_sample(hf_id: str, n: int, revision: str | None = None, config_name: str 
 def hf_full(hf_id: str, revision: str | None = None, config_name: str | None = None, max_rows: int = MAX_ROWS,
             splits: list[str] | None = None) -> pd.DataFrame:
     """Загружает сплиты HF-датасета (все или выбранные) и объединяет: разбиение делаем сами с фиксированным seed."""
+    from factory.core.config import get_config
+    if get_config().offline:
+        raise RuntimeError("Загрузка датасетов с Hugging Face отключена в закрытом контуре")
     from datasets import load_dataset
 
     dsd = load_dataset(hf_id, config_name, revision=revision)

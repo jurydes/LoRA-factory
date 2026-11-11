@@ -40,7 +40,6 @@ from factory.core.storage import (
 from factory.runs import RunPaths
 
 logger = logging.getLogger("factory.worker")
-STARTED = time.time()  # начало процесса: свои чекпоинты отличаются от оставшихся от прошлого процесса раунда
 
 BEST_EVAL_SAMPLES_DURING_TRAINING = 128
 
@@ -56,13 +55,17 @@ def _dtype():
 
 def load_tokenizer(model_id: str):
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(model_id)
+    if get_config().offline and not Path(model_id).is_dir():
+        raise RuntimeError(f"В закрытом контуре модель должна быть локальным каталогом: {model_id}")
+    tok = AutoTokenizer.from_pretrained(model_id, local_files_only=get_config().offline)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     return tok
 
 
 def _hf_login():
+    if get_config().offline:
+        return
     try:
         from settings import load_global_config
         token = load_global_config().hf_token
@@ -76,6 +79,8 @@ def _hf_login():
 def load_unsloth(name: str, cfg: RunConfig):
     """Unsloth: LoRA в bf16 или QLoRA в 4 битах (быстрые ядра, меньше памяти)."""
     from unsloth import FastLanguageModel
+    if get_config().offline and not Path(name).is_dir():
+        raise RuntimeError(f"В закрытом контуре модель должна быть локальным каталогом: {name}")
     info = Registry.load().models.get(cfg.base_model_id)
     extra = {"text_only": True} if info and info.text_only else {}  # мультимодальный чекпоинт: без vision-части
     model, tok = FastLanguageModel.from_pretrained(
@@ -89,6 +94,8 @@ def load_unsloth(name: str, cfg: RunConfig):
 def load_base_model(cfg: RunConfig):
     """База (с квантизацией при необходимости) + токенизатор. Unsloth — только для unsloth_lora."""
     import torch
+    if get_config().offline and not Path(cfg.base_model_id).is_dir():
+        raise RuntimeError(f"В закрытом контуре модель должна быть локальным каталогом: {cfg.base_model_id}")
     _hf_login()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if cfg.backend == "unsloth_lora":
@@ -100,7 +107,7 @@ def load_base_model(cfg: RunConfig):
         kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=_dtype())
-    model = AutoModelForCausalLM.from_pretrained(cfg.base_model_id, **kwargs)
+    model = AutoModelForCausalLM.from_pretrained(cfg.base_model_id, local_files_only=get_config().offline, **kwargs)
     if cfg.quantization == "4bit":
         from peft import prepare_model_for_kbit_training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=cfg.schedule.gradient_checkpointing)
@@ -581,17 +588,16 @@ def mode_pilot(ctx: Ctx, steps: int) -> dict:
 
 
 def _last_checkpoint(round_dir: Path) -> Path | None:
-    from transformers.trainer_utils import get_last_checkpoint
-    if not round_dir.exists():
-        return None
-    ckpt = get_last_checkpoint(str(round_dir))
-    return Path(ckpt) if ckpt else None
+    from factory.training.checkpoints import last_checkpoint
+    return last_checkpoint(round_dir)
 
 
 def mode_train(ctx: Ctx, round_k: int, epochs: float, resume_from: Path | None, lr_override: float | None,
                step_offset: int, epoch_offset: float) -> dict:
     rdir = ctx.paths.round_dir(round_k)
     rdir.mkdir(parents=True, exist_ok=True)
+    from factory.training.checkpoints import new_attempt
+    ctx.checkpoint_dir = new_attempt(rdir)
     cfg = ctx.config_for(rdir)
     train_df, val_df = ctx.frames()
     model, tok = build_model(cfg, resume_adapter=resume_from)
@@ -604,7 +610,7 @@ def mode_train(ctx: Ctx, round_k: int, epochs: float, resume_from: Path | None, 
     continuing = resume_from is not None
     lr = lr_override if lr_override is not None else cfg.optim.lr
     trainer = make_trainer(
-        model, tok, cfg, train_ds, eval_ds, rdir, evaluator, recorder, control_cb, pilot_steps=None, epochs=epochs,
+        model, tok, cfg, train_ds, eval_ds, ctx.checkpoint_dir, evaluator, recorder, control_cb, pilot_steps=None, epochs=epochs,
         lr=lr, scheduler="constant" if continuing else cfg.optim.scheduler,
         warmup=0.0 if continuing else cfg.optim.warmup,
         resume_optimizer=(resume_from / "optimizer.pt") if continuing else None,
@@ -613,14 +619,14 @@ def mode_train(ctx: Ctx, round_k: int, epochs: float, resume_from: Path | None, 
     trainer.train()
     if recorder.nan:
         return {"status": "nan", "message": "loss или норма градиента стали NaN/inf",
-                "checkpoint": str(_last_checkpoint(rdir) or ""), "global_step": step_offset + trainer.state.global_step}
+                "checkpoint": str(_last_checkpoint(ctx.checkpoint_dir) or ""), "global_step": step_offset + trainer.state.global_step}
     if control_cb.aborted:
         return {"status": "aborted", "global_step": step_offset + trainer.state.global_step}
 
     best_dir = rdir / "adapter_best"
     trainer.model.save_pretrained(str(best_dir))  # load_best_model_at_end → в памяти лучший адаптер
     tok.save_pretrained(str(best_dir))
-    ckpt = _last_checkpoint(rdir)
+    ckpt = _last_checkpoint(ctx.checkpoint_dir)
     lr_end = next((l["learning_rate"] for l in reversed(trainer.state.log_history) if "learning_rate" in l), lr)
 
     full_eval = make_evaluator(ctx, val_df, tok, ctx.app.training.num_eval_samples, cfg)
@@ -732,10 +738,10 @@ def main(argv: list[str] | None = None) -> int:
                 # супервизор продолжит с чекпоинта этого процесса, а не начнёт раунд заново. Только своего: номер
                 # чекпоинта — шаг внутри процесса, и чекпоинт прошлого процесса раунда со смещением шагов этого
                 # процесса дал бы двойной счёт (без своего супервизор повторит старт этого процесса — верно)
-                if a.mode == "train" and round_dir.exists():
-                    own = [p for p in round_dir.glob("checkpoint-*") if p.is_dir() and p.stat().st_mtime >= STARTED]
+                if a.mode == "train" and getattr(ctx, "checkpoint_dir", None):
+                    own = _last_checkpoint(ctx.checkpoint_dir)
                     if own:
-                        result["checkpoint"] = str(max(own, key=lambda p: int(p.name.split("-")[-1])))
+                        result["checkpoint"] = str(own)
             else:
                 result = {"status": "error", "message": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-4000:]}
             logger.error("Рабочий процесс: %s", result.get("message"))

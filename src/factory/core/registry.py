@@ -45,7 +45,7 @@ class ModelInfo(BaseModel):
     kv_bytes_per_token: int | None = None  # KV-кэш генерации на токен (bf16, слои с кэшем); None — оценка по hidden_size
     prequantized: bool = False  # веса в репозитории уже в 4 битах (bitsandbytes): только QLoRA, скачивание вчетверо меньше
     base_model: str | None = None  # для квантованной копии — исходная модель
-    source: Literal["registry", "hub"] = "registry"  # реестр (проверен вручную) или подбор с HF Hub (search/models_hub)
+    source: Literal["registry", "hub", "local"] = "registry"
 
 
 def catalog_path(data_dir: Path) -> Path:
@@ -53,22 +53,29 @@ def catalog_path(data_dir: Path) -> Path:
 
 
 class Registry:
-    def __init__(self, tasks: dict[str, TaskInfo], models: list[ModelInfo]):
+    def __init__(self, tasks: dict[str, TaskInfo], models: list[ModelInfo], offline: bool = False):
         self.tasks = tasks
         self.models = {m.id: m for m in models}
+        self.offline = offline
 
     @classmethod
     def load(cls, cfg: AppConfig | None = None) -> "Registry":
         """Реестр + модели, подобранные с HF Hub под эту машину (кэш search/models_hub)."""
         cfg = cfg or get_config()
         reg = cls.from_dir(cfg.registry_dir)
-        reg.add_models(load_catalog(cfg.data_dir))
+        reg.offline = cfg.offline
+        if not cfg.offline:
+            reg.add_models(load_catalog(cfg.data_dir))
+        reg.add_models(load_local_models(cfg.registry_dir))
         return reg
 
     def add_models(self, models: list[ModelInfo]) -> None:
         """Модели каталога HF; записи реестра не перекрываются — они проверены вручную."""
         for m in models:
-            self.models.setdefault(m.id, m)
+            if m.source == "local":
+                self.models[m.id] = m
+            else:
+                self.models.setdefault(m.id, m)
 
     @classmethod
     def from_dir(cls, registry_dir: Path) -> "Registry":
@@ -94,6 +101,10 @@ class Registry:
         """Модели, подходящие под ограничения постановки. Из этого списка LLM может выбирать."""
         out = []
         for m in self.models.values():
+            if self.offline and m.source != "local":
+                continue
+            if not self.offline and m.source == "local":
+                continue
             if constraints.max_model_params_b and m.params_b > constraints.max_model_params_b:
                 continue
             if constraints.commercial_license and not m.commercial_ok:
@@ -152,3 +163,15 @@ def load_catalog(data_dir: Path) -> list[ModelInfo]:
         except Exception:
             continue
     return out
+
+
+def load_local_models(registry_dir: Path) -> list[ModelInfo]:
+    path = registry_dir / "local_models.yaml"
+    if not path.exists():
+        return []
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    models = [ModelInfo.model_validate(m | {"source": "local"}) for m in raw]
+    for model in models:
+        if not Path(model.id).is_dir():
+            raise FileNotFoundError(f"Каталог зарегистрированной локальной модели не найден: {model.id}")
+    return models

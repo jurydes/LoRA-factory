@@ -19,3 +19,5 @@ data/runs/
 data/cache/
 data/mlruns/
 data/locks/
+data/model_source.json
+models/

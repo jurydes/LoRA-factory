@@ -94,6 +94,8 @@ class Orchestrator:
     async def refresh_models(self, force: bool = False) -> int:
         """Каталог моделей HF под эту машину (search/models_hub): реестр дополняется без перезапуска сервиса.
         Свежий кэш (неделя, та же GPU) — без обращений к сети. Возвращает число моделей каталога."""
+        if self.cfg.offline:
+            return 0
         from factory.search import models_hub
         try:
             hw = await asyncio.to_thread(self.hardware)
@@ -421,6 +423,10 @@ class Orchestrator:
             allowed = {r["id"] for r in self.registry.available_models(spec.constraints, spec.language, self.hardware())}
             if spec.base_model_id not in allowed:
                 raise ValueError(f"Модель {spec.base_model_id} не подходит под ограничения; доступны: {sorted(allowed)}")
+            if self.cfg.offline and "bert_score_f1" in self.registry.task(spec.task_type).metrics:
+                model_path = self.cfg.training.bert_score_model
+                if not model_path or not Path(model_path).is_dir():
+                    raise ValueError("Для этой задачи в закрытом контуре укажите локальный training.bert_score_model в config.yaml")
             st.spec = self.registry.apply_task_metrics(spec).model_copy(update={"confirmed_by_user": True})
             if auto:
                 self._auto(st, "spec", "режим Авто: постановка однозначна")
@@ -434,6 +440,9 @@ class Orchestrator:
         if st.user_dataset_path:  # свой датасет вместо поиска по каталогу
             await self._background(sid, "проверка датасета", lambda: self._evaluate_upload(sid, Path(st.user_dataset_path)))
             return
+        if self.cfg.offline:
+            await self._background(sid, "ожидание датасета", lambda: self._direct_search(sid))
+            return
         await self._background(sid, "поиск датасетов", lambda: self._intake_turn(
             sid, "Постановка подтверждена. Найди подходящие датасеты (search_datasets) и покажи их (PresentDatasets)."))
 
@@ -442,17 +451,19 @@ class Orchestrator:
         вместо поиска; при подтверждении или выборе датасета — проверяется сразу."""
         safe = Path(filename).name
         path = self.session_dir(sid) / "uploads" / safe
-        atomic_write_bytes(path, data)
         evaluate_now = False
 
         def check(st: SessionState):
             nonlocal evaluate_now
+            if st.busy:
+                raise RuntimeError(f"Уже идёт операция: {st.busy}")
+            if st.step not in (Step.INTAKE, Step.SPEC_CONFIRM, Step.DATASET_CHOICE):
+                raise ValueError("Загрузить свой датасет можно до выбора датасета")
             if st.step == Step.INTAKE:
+                atomic_write_bytes(path, data)
                 st.user_dataset_path = str(path)
                 st.say(f"Датасет {safe} получен: он будет использован вместо поиска после уточнения постановки.", role="system")
                 return
-            if st.step not in (Step.SPEC_CONFIRM, Step.DATASET_CHOICE):
-                raise ValueError("Загрузить свой датасет можно до выбора датасета")
             if st.step == Step.SPEC_CONFIRM:
                 st.spec = self.registry.apply_task_metrics(st.spec).model_copy(update={"confirmed_by_user": True})
                 for c in st.open_cards():
@@ -460,6 +471,7 @@ class Orchestrator:
                 st.goto(Step.SEARCH)
             st.user_dataset_path = str(path)
             self._set_busy(st, "проверяю загруженный датасет")
+            atomic_write_bytes(path, data)
             evaluate_now = True
         await self._update(sid, check)
         if evaluate_now:
@@ -1000,7 +1012,7 @@ class Orchestrator:
         started = next((e for e in reversed(read_jsonl(paths.events)[0]) if e.get("type") == "round_started"), {})
         plan = RoundPlan(round_k, float(started.get("epochs") or config.schedule.epochs),
                          Path(started["resume_from"]) if started.get("resume_from") else None, None,
-                         0, float(started.get("epoch_offset") or 0.0))
+                         int(started.get("step_offset") or 0), float(started.get("epoch_offset") or 0.0))
 
         def mark(st: SessionState):
             st.busy, st.busy_since, st.activity = "обучение", utcnow(), []
@@ -1012,7 +1024,7 @@ class Orchestrator:
         """При старте: незавершённые фоновые операции сессий снимаются; запуски «идёт» без живого процесса
         помечаются прерванными и продолжаются с последнего чекпоинта (один раз), а если раунд успел закончиться —
         переходят к его итогам."""
-        from transformers.trainer_utils import get_last_checkpoint
+        from factory.training.checkpoints import last_checkpoint
 
         from factory.hparams.history import iter_manifests
         from factory.prep.pipeline import load_recipe
@@ -1072,7 +1084,7 @@ class Orchestrator:
                 await self._update(sid, lambda st: (st.say(f"Запуск {m.run_id} прерван и уже продолжался после сбоя — нужен ручной перезапуск.",
                                                             role="system"), st.goto(Step.FAILED), setattr(st, "busy", None)))
                 continue
-            ckpt = get_last_checkpoint(str(rdir)) if rdir.exists() else None
+            ckpt = last_checkpoint(rdir)
             prev = m.rounds[-1] if m.rounds else None
             base_step = int((read_json(paths.round_dir(prev.round) / "status.json", {}) or {}).get("global_step", 0)) if prev else 0
             base_epoch = prev.epochs_done if prev else 0.0

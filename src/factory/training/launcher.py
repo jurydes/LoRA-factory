@@ -24,6 +24,14 @@ def spawn(paths: RunPaths, mode: str, status_file: Path, *extra: str) -> subproc
     status_file.parent.mkdir(parents=True, exist_ok=True)
     status_file.unlink(missing_ok=True)
     env = os.environ.copy()
+    from factory.core.config import get_config
+    offline = get_config().offline
+    env["FACTORY_OFFLINE"] = "1" if offline else "0"
+    for key in ("HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        if offline:
+            env[key] = "1"
+        else:
+            env.pop(key, None)
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(SRC_DIR), env.get("PYTHONPATH")]))
     env.setdefault("PYTHONUTF8", "1")  # лог пишется в UTF-8; на Windows stdout иначе в cp1251 и падает на эмодзи
     cmd = [sys.executable, "-m", "factory.training.worker", "--run-dir", str(paths.root), "--mode", mode,

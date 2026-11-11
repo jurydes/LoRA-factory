@@ -54,9 +54,15 @@ def library_versions() -> dict[str, str]:
 
 def reuse_key(spec: TaskSpec, dataset: DatasetCandidate, recipe: Recipe, config: RunConfig) -> str:
     """Хэш постановки + датасета + рецепта + конфигурации: совпадение — можно взять готовый адаптер."""
+    model_dir = Path(spec.base_model_id)
+    local_files = None
+    if model_dir.is_dir():
+        relevant = [model_dir / "config.json", *model_dir.glob("*.safetensors"), *model_dir.glob("pytorch_model*.bin")]
+        local_files = sorted((p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in relevant if p.is_file())
     return stable_hash({
         "spec": spec.model_dump(include={"task_type", "language", "labels", "description", "base_model_id"}),
         "dataset": [dataset.hf_id, dataset.revision],
+        "local_model_files": local_files,
         "recipe": recipe.model_dump(mode="json", include={"split_seed", "proportions", "ops"}),
         # seeds не входят: train_seed случаен на каждый запуск, split_seed уже есть в рецепте
         "config": config.model_dump(mode="json", exclude={"rationales", "strategy", "seeds"}),

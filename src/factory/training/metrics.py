@@ -12,6 +12,7 @@ import json
 import re
 import string
 from collections import Counter
+from pathlib import Path
 
 from factory.core.contracts import PredictionExample
 
@@ -30,10 +31,10 @@ def parse_label(prediction: str, labels: list[str]) -> str | None:
     p = normalize(prediction)
     if not p:
         return None
-    by_norm = {normalize(l): l for l in labels}
+    by_norm = {normalize(l): l for l in labels if normalize(l)}
     if p in by_norm:
         return by_norm[p]
-    starts = [l for n, l in by_norm.items() if p.startswith(n)]
+    starts = [l for n, l in by_norm.items() if p.startswith(n + " ")]
     if len(starts) == 1:
         return starts[0]
     contains = [l for n, l in by_norm.items() if re.search(rf"\b{re.escape(n)}\b", p)]
@@ -71,7 +72,7 @@ class _WhitespaceTokenizer:
 def generation_metrics(predictions: list[str], references: list[str], names: list[str]) -> dict[str, float]:
     import sacrebleu
 
-    safe = [p if p.strip() else "нет" for p in predictions]  # как в inference.compute_metrics курсовой
+    safe = [p if p.strip() else "" for p in predictions]
     n = max(len(references), 1)
     out: dict[str, float] = {}
     if "chrf" in names:
@@ -88,12 +89,19 @@ def generation_metrics(predictions: list[str], references: list[str], names: lis
         for k in rouge:
             out[k] = sum(s[k].fmeasure for s in scores) / n
     if "bert_score_f1" in names:
-        out["bert_score_f1"] = _bert_score_f1(safe, references)
+        pairs = [(p, r) for p, r in zip(safe, references) if p]
+        out["bert_score_f1"] = (_bert_score_f1([p for p, _ in pairs], [r for _, r in pairs]) * len(pairs) / n
+                                if pairs else 0.0)
     return out
 
 
 def _bert_score_f1(predictions: list[str], references: list[str]) -> float:
     """BERTScore F1 на GPU, если там свободно ≥ 2 ГБ (на CPU 2000 длинных пар считаются ~7 минут), иначе на CPU."""
+    from factory.core.config import get_config
+    app = get_config()
+    model_type = app.training.bert_score_model or "bert-base-multilingual-cased"
+    if app.offline and not (app.training.bert_score_model and Path(model_type).is_dir()):
+        raise RuntimeError("Для BERTScore в закрытом контуре укажите training.bert_score_model: локальный каталог модели")
     import torch
     from bert_score import score as bert_score_fn
 
@@ -103,11 +111,11 @@ def _bert_score_f1(predictions: list[str], references: list[str]) -> float:
         free += torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
         device = "cuda" if free >= 2 * 1024 ** 3 else "cpu"
     try:
-        _, _, f1 = bert_score_fn(predictions, references, model_type="bert-base-multilingual-cased",
+        _, _, f1 = bert_score_fn(predictions, references, model_type=model_type,
                                  batch_size=32, device=device, verbose=False)
     except torch.cuda.OutOfMemoryError:
         torch.cuda.empty_cache()
-        _, _, f1 = bert_score_fn(predictions, references, model_type="bert-base-multilingual-cased",
+        _, _, f1 = bert_score_fn(predictions, references, model_type=model_type,
                                  batch_size=32, device="cpu", verbose=False)
     finally:
         if device == "cuda":

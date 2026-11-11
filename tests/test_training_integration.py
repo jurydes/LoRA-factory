@@ -4,6 +4,7 @@
 import asyncio
 import json
 import random
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -119,6 +120,37 @@ def test_lora_rounds_pilot_continue_and_final(run_paths):
     report = read_json(paths.eval_report)
     assert report["split"] == "test" and set(report["metrics"]) == {"macro_f1", "accuracy", "weighted_f1"}
     assert any(e["type"] == "test_opened" for e in read_jsonl(paths.events)[0])
+
+
+def test_retry_in_same_round_preserves_previous_checkpoints(run_paths):
+    from pathlib import Path
+    from factory.training.checkpoints import last_checkpoint
+    paths, cfg = run_paths("lora")
+    first = run(paths, "train", "first.json", "--round", "1", "--epochs", "1")
+    assert first["status"] == "ok", first
+    old = Path(first["checkpoint"])
+    old_state = (old / "trainer_state.json").read_bytes()
+    second = run(paths, "train", "second.json", "--round", "1", "--epochs", "0.2",
+                 "--resume-from", str(old), "--lr", str(first["lr_end"]),
+                 "--step-offset", str(first["global_step"]), "--epoch-offset", str(first["epochs_done"]))
+    assert second["status"] == "ok", second
+    new = Path(second["checkpoint"])
+    assert new.parent != old.parent
+    assert int(new.name.split("-")[-1]) < int(old.name.split("-")[-1])
+    assert last_checkpoint(paths.round_dir(1)) == new
+    assert (old / "trainer_state.json").read_bytes() == old_state
+    assert second["global_step"] > first["global_step"]
+
+
+def test_offline_worker_trains_registered_local_model(run_paths, data_dir, tiny_registered, monkeypatch):
+    from factory.core.config import AppConfig
+    from factory.core.local_models import register_local_model
+    paths, _ = run_paths("lora")
+    register_local_model(AppConfig(data_dir=data_dir, offline=True), tiny_registered, languages=["ru"])
+    monkeypatch.setenv("FACTORY_OFFLINE", "1")
+    result = run(paths, "train", "offline.json", "--round", "1", "--epochs", "1")
+    assert result["status"] == "ok", result
+    assert result["checkpoint"] and Path(result["checkpoint"]).exists()
 
 
 def test_ptuning_through_sfttrainer(run_paths):

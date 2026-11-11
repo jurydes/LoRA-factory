@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel
 
-from factory.core.storage import read_json, read_jsonl
+from factory.core.storage import atomic_write_text, read_json, read_jsonl
+from factory.core.registry import Registry
 from factory.orchestrator import Orchestrator
 from factory.runs import RunPaths
 
@@ -34,8 +36,20 @@ class Action(BaseModel):
     payload: dict[str, Any] | None = None
 
 
+class LocalModelRequest(BaseModel):
+    path: str
+    languages: list[str] = ["multi"]
+    license: str = ""
+    commercial_ok: bool = False
+
+
+class ModelSourceRequest(BaseModel):
+    source: Literal["local", "hf"]
+
+
 def create_app(orch: Orchestrator | None = None) -> FastAPI:
     orch = orch or Orchestrator()
+    source_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -110,12 +124,58 @@ def create_app(orch: Orchestrator | None = None) -> FastAPI:
         """Характеристики машины и пригодность моделей реестра (LoRA / QLoRA / не влезает, время)."""
         from factory.hparams.resources import rank_models
         hw = orch.hardware()
-        return {"hardware": hw.model_dump(), "models": rank_models(list(orch.registry.models.values()), hw)}
+        models = [m for m in orch.registry.models.values()
+                  if (m.source == "local") == orch.cfg.offline]
+        return {"hardware": hw.model_dump(), "models": rank_models(models, hw)}
+
+    @app.get("/api/model-source")
+    def model_source():
+        return {"source": "local" if orch.cfg.offline else "hf", "models_dir": str(orch.cfg.models_dir or "")}
+
+    @app.put("/api/model-source")
+    async def set_model_source(body: ModelSourceRequest):
+        async with source_lock:
+            if any(not task.done() for task in orch.tasks.values()):
+                raise HTTPException(409, "Дождитесь завершения текущей операции перед переключением источника моделей")
+            offline = body.source == "local"
+            if orch.cfg.offline != offline:
+                atomic_write_text(orch.cfg.data_dir / "model_source.json", body.model_dump_json())
+                orch.cfg.offline = offline
+                os.environ["FACTORY_OFFLINE"] = "1" if offline else "0"
+                orch.registry = Registry.load(orch.cfg)
+                if not offline:
+                    asyncio.create_task(orch.refresh_models(force=True))
+        return {"source": body.source, "models_dir": str(orch.cfg.models_dir or "")}
 
     @app.post("/api/models/refresh")
     async def refresh_models():
         """Заново подобрать модели с HF Hub под эту машину (не дожидаясь недельного срока кэша)."""
         return {"models": await orch.refresh_models(force=True)}
+
+    @app.get("/api/models/local")
+    def local_models():
+        return [m.model_dump(mode="json") for m in orch.registry.models.values() if m.source == "local"]
+
+    @app.post("/api/models/local")
+    async def register_model(body: LocalModelRequest):
+        from factory.core.local_models import register_local_model
+        try:
+            model = await asyncio.to_thread(register_local_model, orch.cfg, Path(body.path),
+                                             languages=body.languages, license=body.license,
+                                             commercial_ok=body.commercial_ok)
+        except (OSError, ValueError) as e:
+            raise HTTPException(400, str(e)) from e
+        orch.registry.add_models([model])
+        return model.model_dump(mode="json")
+
+    @app.post("/api/datasets/merge", status_code=501)
+    def merge_datasets(body: dict[str, Any]):
+        from factory.prep.merge import MergeRequest, merge_datasets
+        request = MergeRequest.model_validate(body)
+        try:
+            merge_datasets(request)
+        except NotImplementedError as e:
+            raise HTTPException(501, str(e)) from e
 
     @app.get("/api/runs")
     def runs():

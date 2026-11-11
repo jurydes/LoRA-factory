@@ -25,15 +25,23 @@ def split_frame(df: pd.DataFrame, proportions: SplitProportions, seed: int,
                 stratify: bool) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Группы одинаковых входов целиком попадают в один сплит — без утечки дублей в test.
 
-    При stratify распределение меток сохраняется: группы раскладываются внутри каждой метки.
+    При stratify группа относится к своей самой частой метке. Конфликтующая разметка
+    не разделяет одинаковые входы между выборками.
     """
     rng = np.random.default_rng(seed)
     groups = df["input"].map(normalize_text)
     assignment = pd.Series("train", index=df.index)
 
-    strata = df.groupby(df["target"] if stratify else pd.Series(0, index=df.index), sort=True)
+    if stratify:
+        counts = pd.DataFrame({"group": groups, "target": df["target"]}).groupby(
+            ["group", "target"], sort=True).size().reset_index(name="count")
+        majority = counts.sort_values("count", ascending=False, kind="stable").drop_duplicates("group")
+        group_labels = majority.set_index("group")["target"].reindex(groups.unique())
+    else:
+        group_labels = pd.Series(0, index=groups.unique())
+    strata = group_labels.groupby(group_labels, sort=True)
     for _, part in strata:
-        keys = groups.loc[part.index].unique()
+        keys = part.index.to_numpy()
         keys = keys[rng.permutation(len(keys))]
         n = len(keys)
         n_test = int(round(n * proportions.test))
@@ -41,9 +49,8 @@ def split_frame(df: pd.DataFrame, proportions: SplitProportions, seed: int,
         if n >= 3:
             n_test, n_val = max(n_test, 1 if proportions.test > 0 else 0), max(n_val, 1 if proportions.val > 0 else 0)
         test_keys, val_keys = set(keys[:n_test]), set(keys[n_test:n_test + n_val])
-        part_groups = groups.loc[part.index]
-        assignment.loc[part.index[part_groups.isin(test_keys).to_numpy()]] = "test"
-        assignment.loc[part.index[part_groups.isin(val_keys).to_numpy()]] = "val"
+        assignment.loc[groups.isin(test_keys)] = "test"
+        assignment.loc[groups.isin(val_keys)] = "val"
 
     out = [df[assignment == s].reset_index(drop=True) for s in ("train", "val", "test")]
     return out[0], out[1], out[2]

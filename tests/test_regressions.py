@@ -265,3 +265,39 @@ def test_all_modules_compile():
     src = Path(__file__).resolve().parents[1] / "src" / "factory"
     for path in src.rglob("*.py"):
         py_compile.compile(str(path), doraise=True)
+
+
+def test_recover_uses_latest_attempt_checkpoint(run_dir, cfg, registry, monkeypatch):
+    from factory.core.state import SessionState, Step
+    from factory.core.storage import append_jsonl
+    from factory.orchestrator import Orchestrator
+    from factory.runs import load_manifest, save_manifest
+    from factory.training.checkpoints import new_attempt
+
+    orch = Orchestrator(cfg, registry)
+    manifest = load_manifest(run_dir)
+    manifest.status, manifest.pid = "running", None
+    save_manifest(run_dir, manifest)
+    orch.save(SessionState(session_id="s", step=Step.TRAINING, busy="training", run_id=run_dir.run_id))
+    rdir = run_dir.round_dir(1)
+    old = new_attempt(rdir) / "checkpoint-100"
+    write_json(old / "trainer_state.json", {"global_step": 100, "epoch": 0.5})
+    new = new_attempt(rdir) / "checkpoint-20"
+    write_json(new / "trainer_state.json", {"global_step": 20, "epoch": 0.1})
+    append_jsonl(run_dir.events, {"type": "round_started", "time": new.stat().st_mtime - 1,
+                                 "step_offset": 100, "epoch_offset": 0.5})
+    captured = []
+
+    async def training(sid, plan, config):
+        captured.append(plan)
+
+    async def background(sid, label, fn):
+        await fn()
+
+    monkeypatch.setattr(orch, "_run_training", training)
+    monkeypatch.setattr(orch, "_background", background)
+    asyncio.run(orch.recover())
+    assert len(captured) == 1
+    assert captured[0].resume_from == new
+    assert captured[0].step_offset == 120
+    assert captured[0].epoch_offset == pytest.approx(0.6)

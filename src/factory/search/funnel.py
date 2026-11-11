@@ -64,6 +64,9 @@ async def search(spec: TaskSpec, registry: Registry, cfg: AppConfig | None = Non
     """Полная воронка: расширение запроса → BM25+dense → RRF → cross-encoder → совместимость → LLM-оценка."""
     cfg = cfg or get_config()
     say = progress or (lambda _: None)
+    if cfg.offline:
+        say("Закрытый контур: загрузите свой датасет.")
+        return []
     exclude = exclude or set()
 
     query = await expand_query(spec)
@@ -71,6 +74,9 @@ async def search(spec: TaskSpec, registry: Registry, cfg: AppConfig | None = Non
     catalog = await asyncio.to_thread(load_catalog, spec.language, cfg)
     ranked = await asyncio.to_thread(hybrid_search, catalog, query, cfg.search)
     ranked = [(i, s) for i, s in ranked if catalog.records[i]["id"] not in exclude]
+    if not ranked:
+        say("Подходящих датасетов не найдено.")
+        return []
     say(f"Каталог: {len(catalog)} датасетов; после гибридного поиска и реранкинга — {len(ranked)}. Проверяю совместимость…")
 
     finalists: list[tuple[DatasetCandidate, object]] = []

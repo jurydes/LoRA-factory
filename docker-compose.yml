@@ -1,0 +1,20 @@
+services:
+  factory:
+    build: .
+    image: lora-factory:local
+    gpus: all
+    ports:
+      - "127.0.0.1:${FACTORY_PORT:-8000}:8000"
+    environment:
+      FACTORY_OFFLINE: ${FACTORY_OFFLINE:-1}
+      FACTORY_DATA_DIR: /app/data
+      FACTORY_MODELS_DIR: /models
+      OPENAI_SERVER__URL: ${OPENAI_SERVER__URL:-http://host.docker.internal:8001/v1}
+      OPENAI_SERVER__DEFAULT_MODEL: ${OPENAI_SERVER__DEFAULT_MODEL:-local}
+      OPENAI_SERVER__KEY: ${OPENAI_SERVER__KEY:-EMPTY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./models:/models:ro
+    restart: unless-stopped

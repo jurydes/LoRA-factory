@@ -1,6 +1,7 @@
 """Конфигурация приложения: DATA_DIR/config.yaml поверх значений по умолчанию из кода."""
 from __future__ import annotations
 
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -136,10 +137,13 @@ class TrainingConfig(BaseModel):
     final_eval_token_budget: int = 100_000  # test: метки — 2000 примеров, длинные ответы — ~200
     min_eval_samples: int = 50
     test_examples_shown: int = 5
+    bert_score_model: str | None = None  # локальный путь для оценки без HF Hub
 
 
 class AppConfig(BaseModel):
     data_dir: Path = DEFAULT_DATA_DIR
+    offline: bool = False
+    models_dir: Path | None = None  # каталог, доступный для регистрации локальных моделей через API
     llm: LLMConfig = Field(default_factory=LLMConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     dataprep: DataPrepConfig = Field(default_factory=DataPrepConfig)
@@ -195,6 +199,15 @@ def load_config(data_dir: Path | str | None = None) -> AppConfig:
     if path.exists():
         raw = _deep_merge(raw, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
     raw["data_dir"] = str(data_dir)
+    if os.environ.get("FACTORY_OFFLINE") is not None:
+        raw["offline"] = os.environ["FACTORY_OFFLINE"].lower() in {"1", "true", "yes", "on"}
+    source_path = data_dir / "model_source.json"
+    if source_path.exists():
+        source = json.loads(source_path.read_text(encoding="utf-8")).get("source")
+        if source in ("local", "hf"):
+            raw["offline"] = source == "local"
+    if os.environ.get("FACTORY_MODELS_DIR"):
+        raw["models_dir"] = os.environ["FACTORY_MODELS_DIR"]
     if os.environ.get("HPARAM_STRATEGY"):
         raw["hparams"]["strategy"] = os.environ["HPARAM_STRATEGY"]
     return AppConfig.model_validate(raw)

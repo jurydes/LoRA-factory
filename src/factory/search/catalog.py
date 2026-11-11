@@ -91,6 +91,8 @@ def embed_query(text: str, model_name: str) -> np.ndarray:
 def build_catalog(language: str = "ru", cfg: AppConfig | None = None, records: list[dict] | None = None) -> Catalog:
     """Строит кэш каталога и эмбеддинги описаний (офлайн-шаг)."""
     cfg = cfg or get_config()
+    if cfg.offline and records is None:
+        raise RuntimeError("В закрытом контуре нельзя строить каталог с Hugging Face")
     records = records if records is not None else fetch_catalog(language, cfg.search.catalog_limit)
     emb = embed_passages([record_text(r) for r in records], cfg.search.embedding_model) if records else np.zeros((0, 1))
     meta_path, emb_path = _catalog_paths(cfg, language)
@@ -106,11 +108,15 @@ def load_catalog(language: str = "ru", cfg: AppConfig | None = None, build_if_mi
     meta_path, emb_path = _catalog_paths(cfg, language)
     meta = read_json(meta_path)
     if meta is None:
+        if cfg.offline:
+            return Catalog([], None)
         if not build_if_missing:
             return Catalog([], None)
         return build_catalog(language, cfg)
     emb = np.load(emb_path) if emb_path.exists() else None
     if emb is not None and (meta.get("embedding_model") != cfg.search.embedding_model or len(emb) != len(meta["records"])):
+        if cfg.offline:
+            return Catalog(meta["records"], None)
         logger.warning("Эмбеддинги каталога устарели (сменилась модель или записи) — пересчитываю")
         return build_catalog(language, cfg, records=meta["records"])
     return Catalog(meta["records"], emb)
