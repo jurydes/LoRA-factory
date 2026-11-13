@@ -22,6 +22,76 @@ def test_reuse_key_ignores_random_train_seed(cls_spec):
     assert reuse_key(cls_spec, ds, recipe, _config(1)) != reuse_key(cls_spec, ds, recipe, other)
 
 
+def test_restart_passes_failed_training_to_new_hparam_selection(cfg, registry, cls_spec, monkeypatch, data_dir):
+    from types import SimpleNamespace
+    from factory.core.contracts import DataProfile, LengthStats, RoundReport
+    from factory.core.state import Step
+    from factory.hparams import guard, heuristic, strategy
+    from factory.hparams.pilot import PilotReport
+    from factory.hparams.retuning import load_previous_attempts, training_signature
+    from factory.orchestrator import Orchestrator
+    from factory.runs import load_manifest, save_manifest
+    from factory.training import launcher
+
+    orch = Orchestrator(cfg, registry)
+    monkeypatch.setattr(orch, "hardware", lambda: SimpleNamespace(usable_vram_gb=12.0))
+    st = orch.create_session("expert")
+    st.spec, st.dataset = cls_spec, DatasetCandidate(hf_id="x")
+    recipe = Recipe(dataset_id="x", split_seed=1, profile_after=DataProfile(
+        n_rows=2000, input_tokens_est=LengthStats(p95=80, p99=120), target_tokens_est=LengthStats(p95=3, p99=4)))
+    session = orch.session_dir(st.session_id)
+    (session / "data").mkdir(exist_ok=True)
+    write_json(session / "recipe.json", recipe)
+    original_ctx = orch._hparam_context(st, recipe, 42)
+    config = guard.assemble(heuristic.suggest(original_ctx, None), original_ctx, "heuristic")
+    paths, manifest = create_run(cfg.runs_dir, st.spec, st.dataset, recipe, config, session, st.session_id)
+    manifest.status = "round_review"
+    manifest.rounds = [RoundReport(round=1, epochs_done=3, val_metrics={"macro_f1": 0.2},
+                                   diagnosis="Недостаточное качество", recommendation="restart")]
+    manifest.test_metrics = {"macro_f1": 0.99}  # test запрещён как вход повторного подбора
+    save_manifest(paths, manifest)
+    st.run_id, st.run_ids, st.step = paths.run_id, [paths.run_id], Step.ROUND_REVIEW
+    st.recipe_path = str(session / "recipe.json")
+    orch.save(st)
+
+    async def baseline(run_paths, *args):
+        write_json(run_paths.baselines_val, {})
+        return {"status": "ok"}
+
+    async def fake_pilot(run_paths, config, *args):
+        return PilotReport(status="ok", config=config)
+
+    async def start(sid):
+        await orch._run_hparams(sid)
+
+    monkeypatch.setattr(launcher, "run", baseline)
+    monkeypatch.setattr(strategy, "run_pilot", fake_pilot)
+    monkeypatch.setattr(orch, "_start_hparams", start)
+    asyncio.run(orch._round_decision(st.session_id, "restart", None, "user"))
+    after = orch.load(st.session_id)
+    assert after.step == Step.CONFIG_CONFIRM and after.run_id != paths.run_id
+    assert after.restart_of_run_id == paths.run_id
+    assert training_signature(after.pending_config) != training_signature(config)
+    attempts = load_previous_attempts(cfg.runs_dir, after.restart_of_run_id)
+    assert attempts[0].rounds[0].val_metrics == {"macro_f1": 0.2}
+    assert "test_metrics" not in str(attempts[0].summary()) and "0.99" not in str(attempts[0].summary())
+    assert load_manifest(paths).status == "interrupted"
+
+    # Ещё один неудачный запуск: не возвращаемся ни к первой, ни ко второй конфигурации.
+    from factory.runs import RunPaths
+    second_paths = RunPaths(cfg.runs_dir / after.run_id)
+    second = load_manifest(second_paths)
+    second.rounds = [RoundReport(round=1, epochs_done=2, val_metrics={"macro_f1": 0.25}, recommendation="restart")]
+    second.status = "round_review"
+    save_manifest(second_paths, second)
+    after.step = Step.ROUND_REVIEW
+    orch.save(after)
+    asyncio.run(orch._round_decision(st.session_id, "restart", None, "user"))
+    third = orch.load(st.session_id)
+    assert training_signature(third.pending_config) not in {training_signature(config), training_signature(second.config)}
+    assert {a.run_id for a in load_previous_attempts(cfg.runs_dir, third.restart_of_run_id)} == {paths.run_id, second_paths.run_id}
+
+
 @pytest.fixture
 def run_dir(data_dir, cls_spec, cfg):
     session = data_dir / "sessions" / "s"

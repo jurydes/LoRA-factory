@@ -9,6 +9,7 @@ from factory.core.contracts import RunConfig
 from factory.hparams import heuristic, resources
 from factory.hparams.guard import HParamContext, assemble
 from factory.hparams.pilot import PilotReport, run_pilot
+from factory.hparams.retuning import ensure_new_config, repeats_previous
 from factory.runs import RunPaths
 
 logger = logging.getLogger(__name__)
@@ -43,9 +44,12 @@ async def propose(ctx: HParamContext, paths: RunPaths, baselines_val: dict,
             used = "heuristic"
     if choice is None:
         choice = heuristic.suggest(ctx, baseline_primary(baselines_val, ctx.task.primary_metric))
-    config = assemble(choice, ctx, used)
+    config = ensure_new_config(assemble(choice, ctx, used), ctx)
     report = await run_pilot(paths, config, ctx.n_train, ctx.cfg.hparams.pilot)
     config = fit_budget(report, ctx)
+    if repeats_previous(config, ctx):
+        raise ValueError("После исправлений пилота и ограничения бюджета получились уже проверенные параметры. "
+                         "Подберите другую конфигурацию: повторное обучение с теми же параметрами не запущено.")
     return Proposal(config=config, strategy=used, pilot=report, notes=list(ctx.notes), fallback_reason=fallback)
 
 

@@ -17,6 +17,7 @@ from factory.core.contracts import (
 )
 from factory.core.registry import ModelInfo, TaskInfo
 from factory.hparams import resources
+from factory.hparams.retuning import PreviousAttempt
 
 
 class LoraChoice(BaseModel):
@@ -56,6 +57,7 @@ class HParamContext:
     seeds: Seeds
     prompt_overhead_tokens: int = 64
     notes: list[str] = field(default_factory=list)
+    previous_attempts: list[PreviousAttempt] = field(default_factory=list)
 
     @property
     def adapter_kind(self) -> Literal["lora", "ptuning"]:

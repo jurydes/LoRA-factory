@@ -150,3 +150,91 @@ def test_a3_instructions_include_task_heuristics(ctx):
     from factory.agents.hparam import SIZE_HEURISTICS, TASK_HEURISTICS
     assert set(TASK_HEURISTICS) >= {"text_classification", "sentiment_analysis", "summarization", "text_generation", "ner", "qa"}
     assert next(h for limit, h in SIZE_HEURISTICS if 500 < limit).startswith("мало данных")
+
+
+@pytest.mark.parametrize("adapter", ["lora", "ptuning"])
+@pytest.mark.parametrize("agent_fails", [False, True])
+def test_retuning_changes_config_even_with_heuristic_fallback(ctx, monkeypatch, tmp_path, adapter, agent_fails):
+    import asyncio
+    from factory.agents import hparam
+    from factory.hparams import strategy
+    from factory.hparams.retuning import PreviousAttempt, training_signature
+    from factory.runs import RunPaths
+
+    ctx.spec.constraints.adapter_method = adapter
+    original = guard.assemble(heuristic.suggest(ctx, None), ctx, "heuristic")
+    ctx.previous_attempts = [PreviousAttempt("poor-run", original, [])]
+    ctx.seeds.train_seed += 1
+    piloted = []
+
+    async def fake_pilot(paths, config, n_train, pc):
+        piloted.append(config)
+        return pilot.PilotReport(status="ok", config=config)
+
+    async def unavailable(deps):
+        raise RuntimeError("LLM unavailable")
+
+    monkeypatch.setattr(strategy, "run_pilot", fake_pilot)
+    monkeypatch.setattr(hparam, "run", unavailable)
+    for _ in range(3):
+        proposal = asyncio.run(strategy.propose(ctx, RunPaths(tmp_path), {}, "agent" if agent_fails else "heuristic"))
+        assert proposal.pilot.ok and proposal.notes
+        assert all(training_signature(proposal.config) != training_signature(a.config) for a in ctx.previous_attempts)
+        assert ctx.cfg.hparams.ranges.lr[0] <= proposal.config.optim.lr <= ctx.cfg.hparams.ranges.lr[1]
+        assert proposal.config.optim.lr == piloted[-1].optim.lr
+        assert bool(proposal.fallback_reason) == agent_fails
+        ctx.previous_attempts.insert(0, PreviousAttempt("next-run", proposal.config, []))
+
+
+def test_retuning_signature_ignores_seed_logs_and_module_order(ctx):
+    from factory.hparams.retuning import training_signature
+    config = guard.assemble(heuristic.suggest(ctx, None), ctx, "heuristic")
+    changed = config.model_copy(deep=True)
+    changed.seeds.train_seed += 1
+    changed.schedule.logging_steps += 1
+    changed.lora.target_modules.reverse()
+    changed.strategy = "agent"
+    changed.rationales = []
+    assert training_signature(changed) == training_signature(config)
+
+
+def test_agent_rejects_repeated_parameters_and_receives_previous_results(ctx, tmp_path):
+    from types import SimpleNamespace
+    from pydantic_ai import ModelRetry
+    from factory.agents import hparam
+    from factory.core.contracts import RoundReport
+    from factory.hparams.retuning import PreviousAttempt
+    from factory.runs import RunPaths
+
+    choice = heuristic.suggest(ctx, None)
+    config = guard.assemble(choice, ctx, "heuristic")
+    ctx.previous_attempts = [PreviousAttempt("poor-run", config, [
+        RoundReport(round=1, epochs_done=3, val_metrics={"macro_f1": 0.2}, diagnosis="Плохое качество")])]
+    deps = hparam.HParamDeps(ctx=ctx, paths=RunPaths(tmp_path), baselines_val={})
+    run_ctx = SimpleNamespace(deps=deps)
+    context = hparam._context(run_ctx)
+    assert "poor-run" in context and "0.2" in context and "Плохое качество" in context
+    with pytest.raises(ModelRetry, match="уже проверенные"):
+        hparam._check_evidence(run_ctx, choice)
+    choice.lr /= 2
+    choice.rationales = [ParamRationale(param=p, value=choice.lr, reason="прошлая попытка",
+                                       evidence=[{"kind": "run", "ref": "poor-run"}])
+                         for p in ("lr", "epochs", "lora")]
+    assert hparam._check_evidence(run_ctx, choice) == choice
+
+
+def test_retuning_does_not_offer_duplicate_after_pilot(ctx, monkeypatch, tmp_path):
+    import asyncio
+    from factory.hparams import strategy
+    from factory.hparams.retuning import PreviousAttempt
+    from factory.runs import RunPaths
+
+    config = guard.assemble(heuristic.suggest(ctx, None), ctx, "heuristic")
+    ctx.previous_attempts = [PreviousAttempt("poor-run", config, [])]
+
+    async def fake_pilot(*args):
+        return pilot.PilotReport(status="ok", config=config)
+
+    monkeypatch.setattr(strategy, "run_pilot", fake_pilot)
+    with pytest.raises(ValueError, match="После исправлений пилота"):
+        asyncio.run(strategy.propose(ctx, RunPaths(tmp_path), {}, "heuristic"))

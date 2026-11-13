@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 
 from pydantic_ai import Agent, ModelRetry, RunContext, UsageLimits
 
@@ -11,6 +12,7 @@ from factory.core.registry import Registry
 from factory.hparams import history, resources
 from factory.hparams.guard import HParamContext, StrategyChoice, assemble
 from factory.hparams.pilot import run_pilot as _run_pilot
+from factory.hparams.retuning import repeats_previous
 from factory.runs import RunPaths
 
 
@@ -57,6 +59,13 @@ agent = Agent(deps_type=HParamDeps, output_type=StrategyChoice, instructions=INS
 @agent.instructions
 def _context(ctx: RunContext[HParamDeps]) -> str:
     c = ctx.deps.ctx
+    previous = ""
+    if c.previous_attempts:
+        previous = ("\nЭто повторный подбор после неудачного обучения. Предыдущие попытки (только val):\n"
+                    + json.dumps([a.summary() for a in c.previous_attempts], ensure_ascii=False)
+                    + "\nУчти параметры, метрики и диагнозы этих попыток. Предложи другие гиперпараметры и объясни, "
+                    "какую проблему устраняет каждое изменение. Повтор уже проверенной конфигурации запрещён; "
+                    "другой seed или объяснение не считаются изменением. Эти run_id допустимы как evidence.\n")
     return (f"Задача: {c.spec.task_type} ({c.task.family}), язык {c.spec.language}, меток: {len(c.spec.labels or [])}.\n"
             f"Модель: {c.model.id} ({c.model.params_b} млрд), адаптер: {c.adapter_kind}.\n"
             f"Train: {c.n_train} строк; p95 длины входа ≈ {c.profile.input_tokens_est.p95:.0f} ток., ответа ≈ "
@@ -66,7 +75,7 @@ def _context(ctx: RunContext[HParamDeps]) -> str:
             f"Эвристики для этой задачи: {TASK_HEURISTICS.get(c.spec.task_type, '—')}.\n"
             f"Для этого объёма данных: {next(h for limit, h in SIZE_HEURISTICS if c.n_train < limit)}.\n"
             f"{GENERAL}. Эвристики — отправная точка: подкрепляй выбор фрагментами lookup_hparam_docs и похожими запусками; "
-            f"если похожий запуск дал хороший результат на val — ориентируйся на его параметры.")
+            f"если похожий запуск дал хороший результат на val — ориентируйся на его параметры." + previous)
 
 
 @agent.tool
@@ -117,12 +126,16 @@ def _check_evidence(ctx: RunContext[HParamDeps], out: StrategyChoice) -> Strateg
     if kind == "ptuning" and out.ptuning is None:
         raise ModelRetry("Для этой задачи нужен блок ptuning")
     covered = {r.param.split(".")[0] for r in out.rationales}
+    if deps.ctx.previous_attempts:
+        if repeats_previous(assemble(out, deps.ctx, "agent"), deps.ctx):
+            raise ModelRetry("После guard получились уже проверенные гиперпараметры. Учти результаты прошлых "
+                             "попыток из контекста и измени lr, эпохи или параметры адаптера.")
     missing = [p for p in ("lr", "epochs", kind) if p not in covered]
     if missing:
         raise ModelRetry(f"Нет обоснований для параметров: {missing}")
     for r in out.rationales:
         for e in r.evidence:
-            if e.kind == "run" and e.ref not in deps.seen_runs:
+            if e.kind == "run" and e.ref not in deps.seen_runs | {a.run_id for a in deps.ctx.previous_attempts}:
                 raise ModelRetry(f"run_id {e.ref} не встречался в find_similar_runs")
             if e.kind == "doc" and e.ref not in deps.seen_chunks:
                 raise ModelRetry(f"doc_chunk_id {e.ref} не встречался в lookup_hparam_docs")

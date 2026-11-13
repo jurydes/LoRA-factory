@@ -656,11 +656,13 @@ class Orchestrator:
 
     def _hparam_context(self, st: SessionState, recipe: Recipe, train_seed: int):
         from factory.hparams.guard import HParamContext
+        from factory.hparams.retuning import load_previous_attempts
         from factory.training.formatting import instruction
         return HParamContext(
             spec=st.spec, task=self.registry.task(st.spec.task_type), model=self.registry.model(st.spec.base_model_id),
             profile=recipe.profile_after, n_train=recipe.profile_after.n_rows, vram_gb=self.hardware().usable_vram_gb, cfg=self.cfg,
             seeds=Seeds(split_seed=recipe.split_seed, train_seed=train_seed),
+            previous_attempts=load_previous_attempts(self.cfg.runs_dir, st.restart_of_run_id),
             # запас под промпт: реальная инструкция задачи (~3 символа на токен для русского) + обвязка шаблона
             prompt_overhead_tokens=len(instruction(st.spec, self.registry.task(st.spec.task_type))) // 3 + 32)
 
